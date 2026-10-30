@@ -1033,11 +1033,14 @@ function drawTiles() {
 // ================= MOJE ZLECENIA =================
 
 async function viewMine() {
-  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Twoje</div><h1 class="h1">Moje zlecenia</h1><p class="lead" style="margin:0">Zlecenia, które zgłosiłeś(-aś) albo w których jesteś ownerem.</p></div><button class="btn btn-p" data-go="/nowe">Nowe zlecenie</button></div><div id="tiles">${skeleton(3)}</div></section>`;
+  const studio = B.user.role !== 'user';
+  const lead = studio ? 'Zlecenia, które przyjąłeś(-ęłaś) do realizacji.' : 'Zlecenia, które zgłosiłeś(-aś) albo w których jesteś ownerem.';
+  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Twoje</div><h1 class="h1">Moje zlecenia</h1><p class="lead" style="margin:0">${lead}</p></div><button class="btn btn-p" data-go="/nowe">Nowe zlecenie</button></div><div id="tiles">${skeleton(3)}</div></section>`;
   try {
     const list = (await api('listMine')).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     $('#tiles').innerHTML = list.length ? `<div class="grid">${list.map((t, i) => tileHtml(t, false, i)).join('')}</div>`
-      : `<div class="empty"><div class="h">Nie masz jeszcze zleceń</div>Zgłoś pierwsze — zajmie Ci to 3 minuty.</div>`;
+      : studio ? `<div class="empty"><div class="h">Nie masz przyjętych zleceń</div>Wybierz zlecenie z tablicy i kliknij „Biorę to”.</div>`
+        : `<div class="empty"><div class="h">Nie masz jeszcze zleceń</div>Zgłoś pierwsze — zajmie Ci to 3 minuty.</div>`;
   } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 

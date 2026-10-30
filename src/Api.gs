@@ -134,9 +134,12 @@ function listBoard() {
   return rows_('Projekty').map(tile_);
 }
 
+// Studio: zlecenia przyjęte do realizacji; pozostali: zgłoszone przez siebie albo jako owner.
 function listMine() {
   var u = me_();
+  var studio = isStudio_(u);
   return rows_('Projekty').filter(function (r) {
+    if (studio) return r.assigneeEmail === u.email;
     return r.requesterEmail === u.email || String(r.ownerEmail).toLowerCase() === u.email;
   }).map(tile_);
 }

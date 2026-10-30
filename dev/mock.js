@@ -51,7 +51,7 @@
       P.push(p); return { id, deadline: p.deadline };
     },
     listBoard: () => P.map(tile),
-    listMine: () => P.filter(p => p.requesterEmail === ME || p.ownerEmail === ME).map(tile),
+    listMine: () => P.filter(p => me().role !== 'user' ? p.assigneeEmail === ME : (p.requesterEmail === ME || p.ownerEmail === ME)).map(tile),
     getProject: id => full(get(id)),
     claimProject: id => { const p = get(id), u = me(); if (p.assigneeEmail && p.assigneeEmail !== u.email) throw new Error('Już przyjął: ' + p.assigneeName); Object.assign(p, { assigneeEmail: u.email, assigneeName: u.name, claimedAt: iso(), status: p.status === 'Nowe' ? 'W realizacji' : p.status }); p.history.push({ ts: iso(), actor: u.email, action: 'Przyjęte', details: u.name + ' bierze zadanie' }); return full(p); },
     releaseProject: id => { const p = get(id); Object.assign(p, { assigneeEmail: '', assigneeName: '', status: 'Nowe' }); p.history.push({ ts: iso(), actor: ME, action: 'Zwolnione', details: '' }); return full(p); },
