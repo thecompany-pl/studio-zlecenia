@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500&family=Roboto+Mono:wght@400&display=swap" rel="stylesheet">
+  <?!= include('styles') ?>
+</head>
+<body>
+  <header class="top" id="top" hidden>
+    <div class="brand"><img id="logo" alt=""><span>Studio · Zlecenia</span></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="me" id="me"></div>
+  </header>
+  <div class="prog" id="prog" style="width:0"></div>
+  <main id="app"><div class="boot"><div><div class="spin"></div>Ładuję portal…</div></div></main>
+  <div class="toasts" id="toasts"></div>
+  <?!= include('deadline_js') ?>
+  <!--LOADER-->
+  <script>
+  // Logo dociągamy osobno, żeby nie puchła strona.
+  google.script.run.withSuccessHandler(function (src) {
+    window.TC_LOGO = src;
+    var img = document.getElementById('logo'); if (img) img.src = src;
+  }).getAsset('logo');
+  </script>
+  <!--/LOADER-->
+  <?!= include('app_js') ?>
+</body>
+</html>

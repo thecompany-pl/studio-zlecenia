@@ -1,0 +1,14 @@
+{
+  "name": "studio-zlecenia",
+  "private": true,
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node tools/test_deadline.mjs",
+    "push": "node tools/build.mjs && node tools/test_deadline.mjs && clasp push -f",
+    "deploy": "npm run push && clasp update-deployment AKfycbxCuqT-codSSs1sPCR8WEH7U4sRDiSMIxEfX9Oalc8FjnVsh4FtuqDEAD1wcoAFHz1G -d \"$(date +%Y-%m-%d_%H%M)\"",
+    "dev": "node tools/build.mjs && python3 -m http.server 8770 --directory dev"
+  },
+  "devDependencies": {
+    "@google/clasp": "3.4.1"
+  }
+}

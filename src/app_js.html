@@ -1,0 +1,883 @@
+<script>
+'use strict';
+// Portal zleceń Studia TC — frontend (vanilla JS, routing po hashu przez google.script.history).
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const api = (fn, ...args) => new Promise((res, rej) =>
+  google.script.run.withSuccessHandler(res).withFailureHandler(e => rej(new Error((e && e.message) || String(e))))[fn](...args));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} }
+};
+
+let B = null;           // bootstrap z serwera
+let HOL = [];           // daty świąt
+let route = '';
+// Apps Script wycina z kodu wszystko od podwójnego ukośnika do końca linii (także w tekstach), więc adresy składamy z PROTO.
+const PROTO = 'https:' + '/'.repeat(2);
+const DRIVE_FILE = PROTO + 'drive.google.com/file/d/';
+// Tokeny z linków w mailach (?p=ID&t=TOKEN) — otwierają jedno konkretne zlecenie.
+const TOK = (() => { try { return JSON.parse(sessionStorage.getItem('stz_tok') || '{}'); } catch (e) { return {}; } })();
+function saveTok() { try { sessionStorage.setItem('stz_tok', JSON.stringify(TOK)); } catch (e) {} }
+
+// --- drobne helpery UI ---
+
+const ICON = {
+  rolka: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></svg>',
+  trailer: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></svg>',
+  showreel: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M6 3h12M10.5 10v5l4-2.5z"/></svg>',
+  avatar: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/></svg>',
+  inne: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/></svg>',
+  up: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>',
+  doc: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>',
+  img: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>',
+  clock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  x: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  back: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 6l-6 6 6 6"/></svg>',
+  check: '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  search: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="color:var(--mut)"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg>',
+  dl: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4v12M7 11l5 5 5-5M4 20h16"/></svg>',
+  link: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>'
+};
+const BRAND_BG = {
+  'The Company': 'linear-gradient(135deg,#DC143C,#7a1030)',
+  'BNI': 'linear-gradient(135deg,#b3122d,#e2566a)',
+  'BNI+': 'linear-gradient(135deg,#7f1734,#c8102e)',
+  'CC': 'linear-gradient(135deg,#0e6c86,#25a5b8)',
+  'CC+': 'linear-gradient(135deg,#0f6e66,#2bb39a)',
+  'Fundacja': 'linear-gradient(135deg,#c2530c,#f0a020)',
+  'Think Tank': 'linear-gradient(135deg,#4c1d95,#7c3aed)'
+};
+const DAYS = ['nd', 'pn', 'wt', 'śr', 'czw', 'pt', 'sob'];
+const DAYS_LONG = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];
+
+function initials(name) { return String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0].toUpperCase()).join(''); }
+function fmtSize(b) { return b > 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' kB'; }
+function fmtDue(iso, long) {
+  if (!iso) return '—';
+  const [d, t] = iso.split('T'); const [, m, dd] = d.split('-');
+  return (long ? DAYS_LONG : DAYS)[dl_weekday(d)] + ' ' + dd + '.' + m + ', ' + (t || '17:00').slice(0, 5);
+}
+function fmtTs(ts) { if (!ts) return ''; const [d, t] = String(ts).split('T'); const [y, m, dd] = d.split('-'); return dd + '.' + m + '.' + y + ' ' + (t || '').slice(0, 5); }
+function nowWaw() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date()).map(x => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) + Number(p.minute) / 60 };
+}
+function dueInfo(t) {
+  if (t.status === 'Gotowe') return { cls: 'fin', txt: 'gotowe' };
+  const iso = t.confirmedDeadline || t.deadline;
+  if (!iso) return { cls: '', txt: '—' };
+  const ymd = iso.slice(0, 10), n = nowWaw(), hour = Number(iso.slice(11, 13)) || 17;
+  if (ymd < n.date || (ymd === n.date && n.hour >= hour)) return { cls: 'late', txt: 'po terminie · ' + fmtDue(iso) };
+  if (ymd === n.date) return { cls: 'soon', txt: 'dziś ' + iso.slice(11, 16) };
+  const wd = workdaysBetween(n.date, ymd, HOL);
+  if (ymd === dl_addDays(n.date, 1)) return { cls: 'soon', txt: 'jutro ' + iso.slice(11, 16) };
+  return { cls: wd <= 1 ? 'soon' : '', txt: (wd === 1 ? 'za 1 dzień rob.' : 'za ' + wd + ' dni rob.') + ' · ' + fmtDue(iso) };
+}
+function toast(msg, kind = '') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind; el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = 0; setTimeout(() => el.remove(), 300); }, kind === 'bad' ? 6000 : 3200);
+}
+function setProg(p) { $('#prog').style.width = p ? (p * 100) + '%' : '0'; }
+function isStudio() { return B.user.role === 'studio' || B.user.role === 'admin'; }
+
+// --- routing ---
+
+const nav = {
+  push(h) { google.script.history.push(null, null, h.replace(/^#/, '')); render(h); },
+  replace(h) { google.script.history.replace(null, null, h.replace(/^#/, '')); render(h); }
+};
+
+function renderTop() {
+  const items = [['/nowe', 'Nowe zlecenie'], ['/moje', 'Moje zlecenia']];
+  if (isStudio()) items.push(['/tablica', 'Tablica studia']);
+  if (B.user.role === 'admin') items.push(['/ustawienia', 'Ustawienia']);
+  $('#nav').innerHTML = items.map(([h, l]) => `<button data-go="${h}" class="${route.startsWith(h) || (h === '/tablica' && route.startsWith('/projekt')) && isStudio() ? 'on' : ''}">${l}${h === '/tablica' && B.freeCount ? `<span class="count">${B.freeCount}</span>` : ''}</button>`).join('');
+  $('#me').innerHTML = `<span class="nm">${esc(B.user.name)}</span><span class="av" title="${esc(B.user.email)}">${initials(B.user.name)}</span>`;
+}
+
+function render(h) {
+  route = (h || '').replace(/^#/, '') || (isStudio() ? '/tablica' : '/nowe');
+  setProg(0);
+  renderTop();
+  window.scrollTo(0, 0);
+  const m = route.match(/^\/projekt\/(.+)$/);
+  if (m) return viewProject(decodeURIComponent(m[1]));
+  if (route === '/tablica' && isStudio()) return viewBoard();
+  if (route === '/moje') return viewMine();
+  if (route === '/ustawienia' && B.user.role === 'admin') return viewSettings();
+  if (route === '/gotowe') return; // ekran sukcesu rysuje kreator
+  route = '/nowe'; renderTop();
+  return viewWizard();
+}
+
+document.addEventListener('click', e => {
+  const g = e.target.closest('[data-go]');
+  if (g) { e.preventDefault(); nav.push(g.dataset.go); }
+});
+
+// ================= KREATOR ZLECENIA =================
+
+const EMPTY = () => ({
+  title: '', description: '', requesterName: store.get('stz_name', '') || B.user.name, ownerEmail: B.user.email,
+  brand: '', category: '', formats: [], platforms: [], priority: '', materialsLink: '', publishDate: '',
+  scriptFiles: [], tcMode: 'text', tcText: '', timecodesFile: null, cover: null, coverThumb: '',
+  presetKey: '', workDays: 1
+});
+const W = { step: 0, d: null, touched: {}, tried: {}, dir: 1, sending: false, pending: new Map() };
+const STEPS = 4;
+
+function loadDraft() {
+  const d = store.get('stz_draft', null);
+  W.d = Object.assign(EMPTY(), d || {});
+  // pliki tymczasowe na serwerze żyją ~6 h
+  const fresh = f => f && f.meta && (Date.now() - (f.at || 0)) < 5 * 3600e3;
+  W.d.scriptFiles = (W.d.scriptFiles || []).filter(fresh);
+  if (!fresh(W.d.timecodesFile)) W.d.timecodesFile = null;
+  if (!fresh(W.d.cover)) { W.d.cover = null; W.d.coverThumb = ''; }
+  W.step = Math.min(store.get('stz_step', 0), STEPS - 1);
+}
+let draftT = null;
+function saveDraft() {
+  clearTimeout(draftT);
+  draftT = setTimeout(() => {
+    const clean = f => f && f.meta ? { name: f.name, size: f.size, meta: f.meta, at: f.at } : null;
+    store.set('stz_draft', Object.assign({}, W.d, {
+      scriptFiles: W.d.scriptFiles.map(clean).filter(Boolean), timecodesFile: clean(W.d.timecodesFile), cover: clean(W.d.cover)
+    }));
+    store.set('stz_step', W.step);
+  }, 300);
+}
+
+// --- czasówki ---
+const TC_RE = /^\s*(\d{1,2}:\d{2}:\d{2}(?::\d{2})?)\s*[-–—]+\s*(\d{1,2}:\d{2}:\d{2}(?::\d{2})?)\s*(?:\|\s*(.*))?$/;
+function tcSec(s) {
+  const p = s.split(':').map(Number);
+  if (p[1] > 59 || p[2] > 59 || (p.length === 4 && p[3] > 29)) return NaN;
+  return p[0] * 3600 + p[1] * 60 + p[2] + (p.length === 4 ? p[3] / 25 : 0);
+}
+function fmtDur(s) { s = Math.round(s); const m = Math.floor(s / 60), r = s % 60; return (m ? m + ' min ' : '') + r + ' s'; }
+function parseTC(text) {
+  return String(text || '').split('\n').map((line, i) => ({ line, i })).filter(x => x.line.trim()).map(({ line, i }) => {
+    const m = line.match(TC_RE);
+    if (!m) return { n: i + 1, raw: line, ok: false, msg: 'format: 00:01:12 – 00:01:45 | opis' };
+    const a = tcSec(m[1]), b = tcSec(m[2]);
+    if (isNaN(a) || isNaN(b)) return { n: i + 1, raw: line, ok: false, msg: 'nieprawidłowy czas' };
+    if (b <= a) return { n: i + 1, raw: line, ok: false, msg: 'koniec przed początkiem' };
+    return { n: i + 1, ok: true, from: m[1], to: m[2], note: (m[3] || '').trim(), dur: b - a };
+  });
+}
+
+// --- walidacja ---
+function briefErrors(d) {
+  const e = {};
+  if (!d.title.trim()) e.title = 'Wpisz tytuł zadania.';
+  else if (d.title.length > 255) e.title = 'Maksymalnie 255 znaków.';
+  const dl = d.description.trim().length;
+  if (dl < 40) e.description = dl ? `Jeszcze ${40 - dl} znaków — opisz cel, odbiorcę i kluczowy przekaz.` : 'Opisz zadanie (min. 40 znaków).';
+  if (!d.requesterName.trim()) e.requesterName = 'Podaj imię i nazwisko.';
+  const oe = d.ownerEmail.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(oe)) e.ownerEmail = 'Podaj adres e-mail ownera.';
+  else if (!B.domains.includes(oe.split('@')[1])) e.ownerEmail = 'Tylko adresy: ' + B.domains.map(x => '@' + x).join(', ');
+  if (!d.brand) e.brand = 'Wybierz brand.';
+  if (!d.category) e.category = 'Wybierz kategorię.';
+  if (!d.formats.length) e.formats = 'Wybierz co najmniej jeden format.';
+  if (!d.platforms.length) e.platforms = 'Wybierz co najmniej jedną platformę.';
+  if (!d.priority) e.priority = 'Wybierz priorytet.';
+  if (d.category !== 'avatar' && !/^https?:\/\/\S+\.\S+/.test(d.materialsLink.trim())) e.materialsLink = 'Wklej link do materiałów (Drive, TransferNow, Vimeo…).';
+  return e;
+}
+function filesErrors(d) {
+  const e = {};
+  const busy = [...d.scriptFiles, d.timecodesFile, d.cover].some(f => f && f.status === 'up');
+  const rows = parseTC(d.tcText);
+  const tcOk = d.tcMode === 'file' ? !!(d.timecodesFile && d.timecodesFile.meta) : rows.length > 0 && rows.every(r => r.ok);
+  const scriptOk = d.scriptFiles.some(f => f.meta);
+  if (d.tcMode === 'text' && rows.some(r => !r.ok)) e.tc = 'Popraw zaznaczone wiersze czasówek.';
+  else if (!scriptOk && !tcOk) e.need = 'Dodaj scenariusz albo czasówki — bez jednego z nich studio nie ruszy.';
+  if (busy) e.busy = 'Czekam, aż pliki się wgrają…';
+  return e;
+}
+function stepErrors(step) {
+  if (step === 0) { const e = briefErrors(W.d); return e.title ? { title: e.title } : {}; }
+  if (step === 1) { const e = briefErrors(W.d); delete e.title; return e; }
+  if (step === 2) return filesErrors(W.d);
+  return W.d.workDays >= 1 && W.d.workDays <= 60 ? {} : { days: 'Podaj od 1 do 60 dni roboczych.' };
+}
+
+function viewWizard() {
+  if (!W.d) loadDraft();
+  const app = $('#app');
+  const s = W.step;
+  setProg((s + 1) / STEPS);
+  const heads = [
+    ['Jak nazywa się zadanie?', 'Krótko i konkretnie — tak zobaczy je studio na tablicy.'],
+    ['Brief', 'Bez kompletnego briefu nie przejdziesz dalej. Termin realizacji liczymy od otrzymania pełnego briefu.'],
+    ['Scenariusz, czasówki, okładka', 'Dodaj scenariusz albo czasówki wybranego materiału. Okładka jest opcjonalna.'],
+    ['Kiedy potrzebujesz gotowego montażu?', 'Wybierz preferowany czas. Studio potwierdzi termin po przyjęciu zadania.']
+  ];
+  app.innerHTML = `<section class="wiz view">
+    <div class="wiz-head"><div class="stepno"><b>${s + 1}</b> / ${STEPS}</div>
+      ${W.d.title || W.d.description ? '<button class="btn-t btn" id="wReset">Wyczyść szkic</button>' : ''}</div>
+    <div class="${W.dir > 0 ? 'slide-in' : 'slide-back'}">
+      <div class="eyebrow">${['Tytuł', 'Brief', 'Materiały', 'Termin'][s]}</div>
+      <h1 class="q">${heads[s][0]}</h1><p class="q-sub">${heads[s][1]}</p>
+      <div id="wBody">${[stepTitle, stepBrief, stepFiles, stepWhen][s]()}</div>
+    </div>
+    <div class="wiz-foot">
+      <div>${s > 0 ? `<button class="btn btn-g" id="wBack">${ICON.back} Wstecz</button>` : '<span class="keys"><span class="kbd">Enter</span> dalej</span>'}</div>
+      <div style="display:flex;align-items:center;gap:16px">
+        ${s > 0 ? '<span class="keys"><span class="kbd">Esc</span> wstecz · <span class="kbd">Enter</span> dalej</span>' : ''}
+        ${s < STEPS - 1 ? '<button class="btn btn-p btn-lg" id="wNext">Dalej</button>' : `<button class="btn btn-p btn-lg" id="wSend">${W.sending ? '<span class="spin"></span> Wysyłam…' : 'Zatwierdź i wyślij do studia'}</button>`}
+      </div>
+    </div></section>`;
+  bindWizard();
+  refreshWizard();
+  const f = $('#wBody [data-k]'); if (f && s < 2 && !matchMedia('(max-width:640px)').matches) f.focus();
+}
+
+function fieldWrap(k, label, inner, opts = {}) {
+  return `<div class="field" data-f="${k}"><label class="lbl">${label} ${opts.opt ? '<span class="opt">opcjonalnie</span>' : '<span class="req">*</span>'}</label>${inner}${opts.hint ? `<div class="hint">${opts.hint}</div>` : ''}<div class="err"></div></div>`;
+}
+function chips(k, list, multi, render) {
+  const v = W.d[k];
+  return `<div class="chips" data-chips="${k}" data-multi="${multi ? 1 : 0}">${list.map(x => {
+    const val = typeof x === 'string' ? x : x.key;
+    const on = multi ? v.includes(val) : v === val;
+    return `<button type="button" class="chip ${on ? 'on' : ''}" data-v="${esc(val)}">${render ? render(x) : esc(val)}</button>`;
+  }).join('')}</div>`;
+}
+
+function stepTitle() {
+  return `<div class="field" data-f="title"><input class="in in-xl" data-k="title" maxlength="255" placeholder="np. Rolka – podsumowanie Forum BNI Gdańsk" value="${esc(W.d.title)}" autocomplete="off">
+    <div class="counter"><span id="tCount">${W.d.title.length}</span> / 255</div><div class="err"></div></div>`;
+}
+
+function stepBrief() {
+  const d = W.d;
+  return `
+  ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Cel materiału, do kogo mówimy, kluczowy przekaz, CTA, orientacyjna długość, uwagi do montażu…">${esc(d.description)}</textarea><div class="counter"><span id="dCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
+  <div class="row2">
+    ${fieldWrap('requesterName', 'Osoba zgłaszająca', `<input class="in" data-k="requesterName" value="${esc(d.requesterName)}" autocomplete="name">`)}
+    ${fieldWrap('requesterEmail', 'E-mail', `<input class="in" value="${esc(B.user.email)}" readonly>`, { opt: false, hint: 'Z Twojego konta Google.' })}
+  </div>
+  ${fieldWrap('ownerEmail', 'Owner projektu', `<input class="in" data-k="ownerEmail" type="email" value="${esc(d.ownerEmail)}" placeholder="imie.nazwisko@tc.pl">`, { hint: 'Domyślnie Ty. Owner dostaje kopię potwierdzenia.' })}
+  ${fieldWrap('brand', 'Brand', chips('brand', B.brands, false))}
+  ${fieldWrap('category', 'Kategoria', chips('category', B.categories, false, c => `${ICON[c] || ''}<span style="text-transform:capitalize">${esc(c)}</span>`))}
+  ${fieldWrap('formats', 'Format', chips('formats', B.formats, true), { hint: 'Możesz wybrać kilka.' })}
+  ${fieldWrap('platforms', 'Platforma publikacji', chips('platforms', B.platforms, true), { hint: 'Możesz wybrać kilka.' })}
+  ${fieldWrap('priority', 'Priorytet', chips('priority', B.priorities, false, p => `<span class="pdot p-${p.key}"></span>${esc(p.label)}`) +
+    `<div class="sla">${B.priorities.map(p => `<div><b>${esc(p.label)}</b>${esc(p.sla)}</div>`).join('')}</div>`)}
+  <div class="row2">
+    ${fieldWrap('materialsLink', 'Link do materiałów', `<input class="in" data-k="materialsLink" type="url" value="${esc(d.materialsLink)}" placeholder="np. drive.google.com/…">`, { hint: 'Surówki zostają na Drive / TransferNow — tu tylko link.', opt: d.category === 'avatar' })}
+    ${fieldWrap('publishDate', 'Data publikacji', `<input class="in" data-k="publishDate" type="date" value="${esc(d.publishDate)}">`, { opt: true, hint: 'Kiedy materiał idzie w świat.' })}
+  </div>`;
+}
+
+function fileRow(f, k, i) {
+  const st = f.status === 'up' ? `<div class="bar"><i style="width:${Math.round((f.p || 0) * 100)}%"></i></div>`
+    : f.status === 'err' ? `<div class="st-err">${esc(f.err || 'Błąd wgrywania')}</div>` : '<div class="st-ok">wgrane</div>';
+  return `<div class="file"><span class="muted">${ICON.doc}</span><div style="flex:1;min-width:0"><div class="nm">${esc(f.name)}</div>${st}</div><span class="sz">${fmtSize(f.size)}</span><button class="x" data-rm="${k}" data-i="${i}" title="Usuń">${ICON.x}</button></div>`;
+}
+
+function stepFiles() {
+  const d = W.d;
+  const rows = parseTC(d.tcText);
+  const sum = rows.filter(r => r.ok).reduce((a, r) => a + r.dur, 0);
+  return `<div class="grid3">
+    <div class="card"><div class="card-t"><span class="n">1</span> Scenariusz / plik tekstowy</div>
+      <label class="dz" data-dz="script"><input type="file" accept=".txt,.md,.docx,.doc,.pdf,.rtf,.odt" multiple>
+        <div class="ic">${ICON.up}</div><div class="t1">Upuść plik lub kliknij</div><div class="t2">.txt .md .docx .pdf · do 10 MB</div></label>
+      <div class="files">${d.scriptFiles.map((f, i) => fileRow(f, 'script', i)).join('')}</div>
+    </div>
+    <div class="card"><div class="card-t"><span class="n">3</span> Okładka <span class="dim">· opcjonalnie</span></div>
+      ${d.cover ? `<div class="cover-prev" style="background-image:url('${d.coverThumb}')"><button class="x" data-rm="cover" title="Usuń">${ICON.x}</button></div>${d.cover.status === 'up' ? `<div class="file" style="margin-top:8px"><div style="flex:1"><div class="nm">${esc(d.cover.name)}</div><div class="bar"><i style="width:${Math.round((d.cover.p || 0) * 100)}%"></i></div></div></div>` : d.cover.status === 'err' ? `<div class="st-err" style="margin-top:8px">${esc(d.cover.err)}</div>` : ''}`
+      : `<label class="dz" data-dz="cover"><input type="file" accept=".jpg,.jpeg,.png,.webp"><div class="ic">${ICON.img}</div><div class="t1">Upuść obraz lub kliknij</div><div class="t2">.jpg .png .webp · do 10 MB</div></label>`}
+    </div>
+    <div class="card wide"><div class="card-t"><span class="n">2</span> Czasówki wybranego materiału</div>
+      <div class="seg"><button data-tcmode="text" class="${d.tcMode === 'text' ? 'on' : ''}">Wpisz</button><button data-tcmode="file" class="${d.tcMode === 'file' ? 'on' : ''}">Wgraj plik</button></div>
+      ${d.tcMode === 'text' ? `<textarea class="in tc-ed" data-k="tcText" spellcheck="false" placeholder="00:01:12 – 00:01:45 | wypowiedź prezesa o wynikach&#10;00:03:02:12 – 00:03:20:00 | ujęcie sali z góry">${esc(d.tcText)}</textarea>
+        <div class="hint">Jeden fragment w wierszu: <b>HH:MM:SS</b> lub <b>HH:MM:SS:FF</b> (25 kl./s), myślnik, opcjonalnie „| opis".</div>
+        <div id="tcPrev">${rows.length ? `<table class="tc-tab"><tr><th>#</th><th>Od</th><th>Do</th><th>Długość</th><th>Opis</th></tr>${rows.map(r => r.ok
+          ? `<tr><td class="dim">${r.n}</td><td class="mono">${r.from}</td><td class="mono">${r.to}</td><td class="mono">${fmtDur(r.dur)}</td><td>${esc(r.note)}</td></tr>`
+          : `<tr class="bad"><td>${r.n}</td><td colspan="4">${esc(r.raw)} — ${r.msg}</td></tr>`).join('')}</table>
+          <div class="tc-sum"><span>${rows.filter(r => r.ok).length} fragmentów</span><span>Łącznie: <b style="color:var(--tx)">${fmtDur(sum)}</b></span></div>` : ''}</div>`
+      : `${d.timecodesFile ? `<div class="files">${fileRow(d.timecodesFile, 'tc', 0)}</div>` : `<label class="dz" data-dz="tc"><input type="file" accept=".txt,.csv,.edl,.xml"><div class="ic">${ICON.up}</div><div class="t1">Upuść plik z czasówkami</div><div class="t2">.txt .csv .edl .xml · do 10 MB</div></label>`}`}
+    </div>
+  </div>
+  <div class="field" data-f="need" style="margin-top:16px"><div class="err"></div></div>`;
+}
+
+function presetFor(cat) { return B.presets.find(p => p.key === cat); }
+function curCutoff() { const p = B.presets.find(x => x.key === W.d.presetKey); return p ? p.cutoff || 0 : 0; }
+function presetDesc(p) {
+  const d = p.days === 1 ? '1 dzień rob.' : p.days + ' dni rob.';
+  return p.cutoff ? `do ${p.cutoff}:00 → ten sam dzień` : (p.hint ? esc(p.hint) + ' · ' : '') + d;
+}
+function stepWhen() {
+  const d = W.d;
+  if (!d.presetKey) { const p = presetFor(d.category) || B.presets[0]; d.presetKey = p.key; d.workDays = p.days; }
+  const n = nowWaw();
+  const due = computeDeadline(n.date, n.hour, d.workDays, HOL, curCutoff());
+  const prio = B.priorities.find(p => p.key === d.priority);
+  return `<div class="presets">${B.presets.map(p => `<button type="button" class="preset ${d.presetKey === p.key ? 'on' : ''}" data-preset="${esc(p.key)}">
+      <div class="pl">${esc(p.label)}</div><div class="ph">${presetDesc(p)}</div></button>`).join('')}
+    <button type="button" class="preset ${d.presetKey === 'wlasny' ? 'on' : ''}" data-preset="wlasny"><div class="pl">Własny</div><div class="ph">ustaw liczbę dni</div></button></div>
+    ${d.presetKey === 'wlasny' ? `<div class="custom-days"><input class="in" type="number" min="1" max="60" data-k="workDays" value="${d.workDays}"><span class="muted">dni roboczych</span></div>` : ''}
+    <div class="due-box"><div class="k">Preferowany odbiór</div><div class="v" id="dueV">${fmtDue(due, true)}</div>
+      <div class="n">To termin preferowany, nie gwarantowany — zależy od obłożenia studia. Studio potwierdzi go po przyjęciu zadania. Liczymy dni robocze pn–pt 9:00–17:00, bez świąt.</div></div>
+    <h3 class="card-t" style="margin:34px 0 14px">Podsumowanie</h3>
+    <div class="summary">
+      ${tileHtml({ id: '', title: d.title, status: 'Nowe', brand: d.brand, category: d.category, formats: d.formats, priority: d.priority, deadline: due, coverThumb: d.coverThumb }, true)}
+      <div class="card"><dl class="kv">
+        <dt>Zgłasza</dt><dd>${esc(d.requesterName)} · ${esc(B.user.email)}</dd>
+        <dt>Owner</dt><dd>${esc(d.ownerEmail)}</dd>
+        <dt>Platformy</dt><dd>${esc(d.platforms.join(', '))}</dd>
+        <dt>Priorytet</dt><dd>${prio ? `<span class="pdot p-${prio.key}"></span> ${esc(prio.label)}` : ''}</dd>
+        ${d.publishDate ? `<dt>Publikacja</dt><dd>${esc(d.publishDate.split('-').reverse().join('.'))}</dd>` : ''}
+        <dt>Materiały</dt><dd>${d.materialsLink ? `<a href="${esc(d.materialsLink)}" target="_blank">${esc(d.materialsLink)}</a>` : '—'}</dd>
+        <dt>Załączniki</dt><dd>${[...d.scriptFiles.map(f => f.name), d.tcMode === 'file' && d.timecodesFile ? d.timecodesFile.name : '', d.tcMode === 'text' && d.tcText.trim() ? parseTC(d.tcText).length + ' czasówek' : '', d.cover ? 'okładka' : ''].filter(Boolean).map(esc).join(', ') || '—'}</dd>
+        <dt>Opis</dt><dd class="muted" style="white-space:pre-wrap">${esc(d.description.length > 320 ? d.description.slice(0, 320) + '…' : d.description)}</dd>
+      </dl></div>
+    </div>`;
+}
+
+function refreshWizard() {
+  const errs = stepErrors(W.step);
+  $$('#wBody [data-f]').forEach(el => {
+    const k = el.dataset.f;
+    let msg = errs[k];
+    if (k === 'need') msg = errs.busy || errs.tc || errs.need;
+    const show = msg && (W.touched[k] || W.tried[W.step] || k === 'need' && (errs.tc || W.tried[W.step]));
+    el.classList.toggle('bad', !!show);
+    const er = $('.err', el); if (er) er.textContent = show ? msg : '';
+  });
+  const btn = $('#wNext') || $('#wSend');
+  if (btn) btn.classList.toggle('off', Object.keys(errs).length > 0 || W.sending);
+}
+
+function rerenderBody() {
+  const y = window.scrollY;
+  $('#wBody').innerHTML = [stepTitle, stepBrief, stepFiles, stepWhen][W.step]();
+  bindBody(); refreshWizard();
+  window.scrollTo(0, y);
+}
+
+function goStep(delta) {
+  if (delta > 0) {
+    const errs = stepErrors(W.step);
+    if (Object.keys(errs).length) {
+      W.tried[W.step] = true; refreshWizard();
+      const bad = $('#wBody .field.bad'); if (bad) bad.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+  }
+  W.step = Math.max(0, Math.min(STEPS - 1, W.step + delta));
+  W.dir = delta; saveDraft(); viewWizard();
+}
+
+function bindWizard() {
+  $('#wNext') && ($('#wNext').onclick = () => goStep(1));
+  $('#wBack') && ($('#wBack').onclick = () => goStep(-1));
+  $('#wSend') && ($('#wSend').onclick = submitWizard);
+  $('#wReset') && ($('#wReset').onclick = () => { if (confirm('Wyczyścić cały szkic zlecenia?')) { store.del('stz_draft'); store.del('stz_step'); W.d = null; W.step = 0; W.touched = {}; W.tried = {}; viewWizard(); } });
+  bindBody();
+}
+
+function bindBody() {
+  $$('#wBody [data-k]').forEach(el => {
+    el.addEventListener('input', () => {
+      const k = el.dataset.k;
+      W.d[k] = k === 'workDays' ? Math.max(0, Math.round(Number(el.value) || 0)) : el.value;
+      if (k === 'requesterName') store.set('stz_name', el.value);
+      if (k === 'title') $('#tCount').textContent = el.value.length;
+      if (k === 'description') $('#dCount').textContent = el.value.trim().length;
+      if (k === 'tcText') { const tp = $('#tcPrev'); const tmp = document.createElement('div'); tmp.innerHTML = stepFiles(); tp.innerHTML = $('#tcPrev', tmp).innerHTML; }
+      if (k === 'workDays') { const n = nowWaw(); if (W.d.workDays >= 1 && W.d.workDays <= 60) { $('#dueV').textContent = fmtDue(computeDeadline(n.date, n.hour, W.d.workDays, HOL, curCutoff()), true); } }
+      saveDraft(); refreshWizard();
+    });
+    el.addEventListener('blur', () => { W.touched[el.dataset.k] = true; refreshWizard(); });
+  });
+  $$('#wBody [data-chips]').forEach(box => box.addEventListener('click', e => {
+    const c = e.target.closest('.chip'); if (!c) return;
+    const k = box.dataset.chips, v = c.dataset.v;
+    if (box.dataset.multi === '1') {
+      const arr = W.d[k]; const i = arr.indexOf(v);
+      i >= 0 ? arr.splice(i, 1) : arr.push(v); c.classList.toggle('on', i < 0);
+    } else {
+      W.d[k] = v; $$('.chip', box).forEach(x => x.classList.toggle('on', x === c));
+      if (k === 'category') { W.d.presetKey = ''; rerenderBody(); }
+    }
+    W.touched[k] = true; saveDraft(); refreshWizard();
+  }));
+  $$('#wBody [data-preset]').forEach(b => b.onclick = () => {
+    const k = b.dataset.preset; W.d.presetKey = k;
+    if (k !== 'wlasny') W.d.workDays = B.presets.find(p => p.key === k).days;
+    saveDraft(); rerenderBody();
+  });
+  $$('#wBody [data-tcmode]').forEach(b => b.onclick = () => { W.d.tcMode = b.dataset.tcmode; saveDraft(); rerenderBody(); });
+  $$('#wBody [data-rm]').forEach(b => b.onclick = e => {
+    e.preventDefault(); const k = b.dataset.rm;
+    if (k === 'script') W.d.scriptFiles.splice(Number(b.dataset.i), 1);
+    if (k === 'tc') W.d.timecodesFile = null;
+    if (k === 'cover') { W.d.cover = null; W.d.coverThumb = ''; }
+    saveDraft(); rerenderBody();
+  });
+  $$('#wBody [data-dz]').forEach(dz => {
+    const inp = $('input', dz);
+    inp.onchange = () => { addFiles(dz.dataset.dz, [...inp.files]); inp.value = ''; };
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+    dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); addFiles(dz.dataset.dz, [...e.dataTransfer.files]); });
+  });
+}
+
+document.addEventListener('keydown', e => {
+  if (!route.startsWith('/nowe') || !W.d) return;
+  if (e.key === 'Escape' && W.step > 0) { e.preventDefault(); goStep(-1); }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    const ta = e.target.tagName === 'TEXTAREA';
+    if (ta && !(e.metaKey || e.ctrlKey)) return;
+    if (e.target.closest && e.target.closest('button')) return;
+    e.preventDefault();
+    W.step < STEPS - 1 ? goStep(1) : submitWizard();
+  }
+});
+
+// --- upload ---
+const EXT = { script: ['txt', 'md', 'docx', 'doc', 'pdf', 'rtf', 'odt'], tc: ['txt', 'csv', 'edl', 'xml'], cover: ['jpg', 'jpeg', 'png', 'webp'] };
+const KIND = { script: 'script', tc: 'timecodes', cover: 'cover' };
+const CHUNK = 2 * 1024 * 1024;
+
+function rid() { return Array.from(crypto.getRandomValues(new Uint8Array(12)), b => (b % 36).toString(36)).join('') + Date.now().toString(36); }
+function readB64(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
+}
+function makeThumb(file) {
+  return new Promise(res => {
+    const img = new Image(); const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const W0 = 480, H0 = 270, c = document.createElement('canvas'); c.width = W0; c.height = H0;
+      const s = Math.max(W0 / img.width, H0 / img.height), w = img.width * s, h = img.height * s;
+      c.getContext('2d').drawImage(img, (W0 - w) / 2, (H0 - h) / 2, w, h);
+      let q = .74, out = c.toDataURL('image/jpeg', q);
+      while (out.length > 46000 && q > .3) { q -= .1; out = c.toDataURL('image/jpeg', q); }
+      URL.revokeObjectURL(url); res(out);
+    };
+    img.onerror = () => res(''); img.src = url;
+  });
+}
+
+async function uploadOne(f, file, kind) {
+  try {
+    const b64 = await readB64(file);
+    const id = rid(), total = Math.max(1, Math.ceil(b64.length / CHUNK));
+    for (let i = 0; i < total; i++) {
+      await api('uploadChunk', id, i, b64.slice(i * CHUNK, (i + 1) * CHUNK));
+      f.p = (i + 1) / (total + 1); updateBars();
+    }
+    f.meta = await api('finalizeUpload', id, total, file.name, file.type || 'application/octet-stream', kind);
+    f.status = 'ok'; f.p = 1; f.at = Date.now();
+  } catch (err) {
+    f.status = 'err'; f.err = err.message;
+  }
+  saveDraft();
+  updateBars();
+}
+// Nie przerysowuj kroku, gdy ktoś akurat pisze czasówki — straciłby fokus.
+function updateBars() {
+  if (!route.startsWith('/nowe') || W.step !== 2) return;
+  const a = document.activeElement;
+  if (a && a.closest && a.closest('#wBody') && /INPUT|TEXTAREA/.test(a.tagName)) { refreshWizard(); return; }
+  rerenderBody();
+}
+
+async function addFiles(slot, files) {
+  for (const file of files) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!EXT[slot].includes(ext)) { toast(`„${file.name}" — niedozwolony typ pliku.`, 'bad'); continue; }
+    if (file.size > 10 * 1024 * 1024) { toast(`„${file.name}" ma ponad 10 MB.`, 'bad'); continue; }
+    const f = { name: file.name, size: file.size, status: 'up', p: 0.02 };
+    if (slot === 'script') { if (W.d.scriptFiles.length >= 5) { toast('Maksymalnie 5 plików scenariusza.', 'bad'); break; } W.d.scriptFiles.push(f); }
+    if (slot === 'tc') W.d.timecodesFile = f;
+    if (slot === 'cover') { W.d.cover = f; W.d.coverThumb = await makeThumb(file); }
+    rerenderBody();
+    const p = uploadOne(f, file, KIND[slot]);
+    W.pending.set(f, p); p.finally(() => W.pending.delete(f));
+    if (slot !== 'script') break;
+  }
+}
+
+async function submitWizard() {
+  if (W.sending) return;
+  for (let s = 0; s < STEPS; s++) {
+    const errs = stepErrors(s);
+    const real = Object.keys(errs).filter(k => k !== 'busy');
+    if (real.length) { W.tried[s] = true; if (s !== W.step) { W.step = s; W.dir = -1; viewWizard(); } else refreshWizard(); toast('Uzupełnij brakujące pola.', 'bad'); return; }
+  }
+  W.sending = true; refreshWizard();
+  const btn = $('#wSend'); btn.innerHTML = '<span class="spin"></span> Wysyłam…';
+  try {
+    if (W.pending.size) { btn.innerHTML = '<span class="spin"></span> Czekam na pliki…'; await Promise.all(W.pending.values()); btn.innerHTML = '<span class="spin"></span> Wysyłam…'; }
+    const d = W.d;
+    if ([...d.scriptFiles, d.timecodesFile, d.cover].some(f => f && f.status === 'err')) throw new Error('Któryś plik się nie wgrał — usuń go albo dodaj ponownie.');
+    const rows = parseTC(d.tcText).filter(r => r.ok).map(r => ({ from: r.from, to: r.to, note: r.note }));
+    const res = await api('submitRequest', {
+      title: d.title.trim(), description: d.description.trim(), requesterName: d.requesterName.trim(), ownerEmail: d.ownerEmail.trim(),
+      brand: d.brand, category: d.category, formats: d.formats, platforms: d.platforms, priority: d.priority,
+      materialsLink: d.materialsLink.trim(), publishDate: d.publishDate,
+      scriptFiles: d.scriptFiles.filter(f => f.meta).map(f => f.meta),
+      timecodesFile: d.tcMode === 'file' && d.timecodesFile && d.timecodesFile.meta ? d.timecodesFile.meta : null,
+      timecodes: d.tcMode === 'text' ? rows : [],
+      cover: d.cover && d.cover.meta ? d.cover.meta : null, coverThumb: d.cover ? d.coverThumb : '',
+      presetKey: d.presetKey, workDays: d.workDays
+    });
+    store.del('stz_draft'); store.del('stz_step');
+    W.d = null; W.step = 0; W.touched = {}; W.tried = {}; W.sending = false;
+    google.script.history.replace(null, null, '/gotowe'); route = '/gotowe'; setProg(1); renderTop();
+    $('#app').innerHTML = `<section class="done view"><div class="ok-ic">${ICON.check}</div>
+      <h1 class="h1">Zlecenie wysłane do studia</h1><div class="num">${esc(res.id)}</div>
+      <p class="muted">Preferowany odbiór: <b style="color:var(--tx)">${fmtDue(res.deadline, true)}</b><br>Potwierdzenie poszło na Twój mail${d.ownerEmail.toLowerCase() !== B.user.email ? ' i do ownera' : ''}. Dostaniesz też maila, gdy ktoś ze studia weźmie zadanie.</p>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:26px;flex-wrap:wrap">
+        <button class="btn btn-p" data-go="/nowe">Zgłoś kolejne</button><button class="btn btn-g" data-go="/projekt/${encodeURIComponent(res.id)}">Zobacz zlecenie</button></div></section>`;
+  } catch (err) {
+    W.sending = false; toast(err.message, 'bad');
+    if ($('#wSend')) { $('#wSend').textContent = 'Zatwierdź i wyślij do studia'; refreshWizard(); }
+  }
+}
+
+// ================= KAFELKI =================
+
+function tileHtml(t, preview, i = 0) {
+  const due = dueInfo(t);
+  const bg = t.coverThumb ? `background-image:url('${t.coverThumb}')` : `background:${BRAND_BG[t.brand] || 'linear-gradient(135deg,#2a0a12,#121635)'}`;
+  const tag = preview ? 'div' : 'button';
+  return `<${tag} class="tile" ${preview ? '' : `data-go="/projekt/${encodeURIComponent(t.id)}"`} style="animation-delay:${Math.min(i, 12) * 35}ms">
+    <div class="tile-cover" style="${bg}">
+      ${t.priority ? `<span class="badge pr"><span class="pdot p-${esc(t.priority)}"></span>${esc(t.priority)}</span>` : ''}
+      <span class="badge st">${esc(t.status)}</span>
+      <span class="cat">${ICON[t.category] || ''}${esc(t.category || '—')}</span>
+    </div>
+    <div class="tile-body">
+      <div class="tile-meta">${esc(t.brand || '—')}${t.id ? ' · ' + esc(t.id) : ''}</div>
+      <div class="tile-title">${esc(t.title || 'Bez tytułu')}</div>
+      <div class="tile-fmt">${(t.formats || []).map(f => `<span class="fmt">${esc(f.split(' ')[0])}</span>`).join('')}</div>
+      <div class="tile-foot"><span class="due ${due.cls}">${ICON.clock}${esc(due.txt)}</span>
+        ${t.assigneeName ? `<span class="who"><span class="av" title="${esc(t.assigneeName)}">${initials(t.assigneeName)}</span></span>` : '<span class="free">Wolne</span>'}</div>
+    </div></${tag}>`;
+}
+function skeleton(n = 6) { return `<div class="grid">${Array.from({ length: n }, () => '<div class="sk-tile"></div>').join('')}</div>`; }
+
+// ================= TABLICA =================
+
+const F = Object.assign({ status: 'aktywne', brand: '', category: '', who: '', q: '', sort: 'termin' }, store.get('stz_filters', {}));
+let BOARD = [];
+
+async function viewBoard() {
+  const app = $('#app');
+  app.innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Studio</div><h1 class="h1">Tablica zleceń</h1></div><div class="stats" id="stats"></div></div><div id="filters"></div><div id="tiles">${skeleton()}</div></section>`;
+  try { BOARD = await api('listBoard'); } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  B.freeCount = BOARD.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop();
+  drawBoard();
+}
+
+function drawBoard() {
+  if (!$('#filters')) return;
+  const fc = (k, v, label) => `<button class="chip ${F[k] === v ? 'on' : ''}" data-fk="${k}" data-fv="${esc(v)}">${label || esc(v)}</button>`;
+  const cnt = s => BOARD.filter(t => t.status === s).length;
+  $('#stats').innerHTML = [['Nowe', cnt('Nowe')], ['W realizacji', cnt('W realizacji')], ['Do akceptacji', cnt('Do akceptacji')], ['Wolne', B.freeCount]]
+    .map(([k, v]) => `<div class="stat"><div class="sv">${v}</div><div class="sk">${k}</div></div>`).join('');
+  $('#filters').innerHTML = `<div class="filters">
+    ${fc('status', 'aktywne', 'Aktywne')}${B.statuses.map(s => fc('status', s)).join('')}${fc('status', '', 'Wszystkie')}
+    <span class="sep"></span>${fc('who', 'moje', 'Moje')}${fc('who', 'wolne', 'Wolne')}
+    <span class="sep"></span>
+    <select class="sel" data-fsel="brand"><option value="">Każdy brand</option>${B.brands.map(b => `<option ${F.brand === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>
+    <select class="sel" data-fsel="category"><option value="">Każda kategoria</option>${B.categories.map(b => `<option ${F.category === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>
+    <select class="sel" data-fsel="sort"><option value="termin" ${F.sort === 'termin' ? 'selected' : ''}>Sortuj: termin</option><option value="priorytet" ${F.sort === 'priorytet' ? 'selected' : ''}>Sortuj: priorytet</option><option value="data" ${F.sort === 'data' ? 'selected' : ''}>Sortuj: najnowsze</option></select>
+    <label class="search">${ICON.search}<input id="fq" placeholder="Szukaj po tytule…" value="${esc(F.q)}"></label></div>`;
+  $$('#filters [data-fk]').forEach(b => b.onclick = () => { const k = b.dataset.fk, v = b.dataset.fv; F[k] = (F[k] === v && k === 'who') ? '' : v; saveF(); drawBoard(); });
+  $$('#filters [data-fsel]').forEach(s => s.onchange = () => { F[s.dataset.fsel] = s.value; saveF(); drawBoard(); });
+  $('#fq').oninput = e => { F.q = e.target.value; saveF(); drawTiles(); };
+  drawTiles();
+}
+function saveF() { store.set('stz_filters', Object.assign({}, F, { q: '' })); }
+
+function drawTiles() {
+  const PR = { krytyczny: 0, wysoki: 1, 'średni': 2, niski: 3 };
+  const q = F.q.trim().toLowerCase();
+  let list = BOARD.filter(t =>
+    (F.status === 'aktywne' ? t.status !== 'Gotowe' : !F.status || t.status === F.status) &&
+    (!F.brand || t.brand === F.brand) && (!F.category || t.category === F.category) &&
+    (F.who !== 'moje' || t.assigneeEmail === B.user.email) && (F.who !== 'wolne' || !t.assigneeEmail) &&
+    (!q || (t.title + ' ' + t.id).toLowerCase().includes(q)));
+  const dueK = t => t.confirmedDeadline || t.deadline || '9999';
+  list.sort(F.sort === 'priorytet' ? (a, b) => (PR[a.priority] ?? 9) - (PR[b.priority] ?? 9) || dueK(a).localeCompare(dueK(b))
+    : F.sort === 'data' ? (a, b) => String(b.createdAt).localeCompare(String(a.createdAt))
+    : (a, b) => dueK(a).localeCompare(dueK(b)));
+  $('#tiles').innerHTML = list.length ? `<div class="grid">${list.map((t, i) => tileHtml(t, false, i)).join('')}</div>`
+    : `<div class="empty"><div class="h">${BOARD.length ? 'Nic nie pasuje do filtrów' : 'Tablica jest pusta'}</div>${BOARD.length ? 'Zmień filtry albo wyczyść wyszukiwanie.' : 'Nowe zlecenia pojawią się tu zaraz po wysłaniu briefu.'}</div>`;
+}
+
+// ================= MOJE ZLECENIA =================
+
+async function viewMine() {
+  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Twoje</div><h1 class="h1">Moje zlecenia</h1><p class="lead" style="margin:0">Zlecenia, które zgłosiłeś(-aś) albo w których jesteś ownerem.</p></div><button class="btn btn-p" data-go="/nowe">Nowe zlecenie</button></div><div id="tiles">${skeleton(3)}</div></section>`;
+  try {
+    const list = (await api('listMine')).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+    $('#tiles').innerHTML = list.length ? `<div class="grid">${list.map((t, i) => tileHtml(t, false, i)).join('')}</div>`
+      : `<div class="empty"><div class="h">Nie masz jeszcze zleceń</div>Zgłoś pierwsze — zajmie Ci to 3 minuty.</div>`;
+  } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ================= PROJEKT =================
+
+async function viewProject(id) {
+  const app = $('#app');
+  app.innerHTML = `<section class="view"><div class="sk-tile" style="height:230px;margin-bottom:24px"></div><div class="sk-tile" style="height:400px"></div></section>`;
+  let p;
+  try { p = await api('getProject', id, TOK[id] || ''); } catch (e) { app.innerHTML = `<section class="view"><div class="empty"><div class="h">Nie udało się otworzyć zlecenia</div>${esc(e.message)}</div></section>`; return; }
+  drawProject(p);
+}
+
+function drawProject(p) {
+  const due = dueInfo(p);
+  const prio = B.priorities.find(x => x.key === p.priority);
+  const bg = p.coverThumb ? `background-image:url('${p.coverThumb}')` : `background:${BRAND_BG[p.brand] || '#121635'}`;
+  const tcSum = (p.timecodes || []).reduce((a, r) => a + (tcSec(r.to) - tcSec(r.from)), 0);
+  const backTo = p.can.studio ? '/tablica' : '/moje';
+  const filesList = [...p.scriptFiles.map(f => [f, 'Scenariusz']), p.timecodesFile ? [p.timecodesFile, 'Czasówki'] : null, p.coverFileId ? [{ id: p.coverFileId, name: 'Okładka (oryginał)' }, 'Okładka'] : null].filter(Boolean);
+  $('#app').innerHTML = `<section class="view">
+    <button class="back" data-go="${backTo}">${ICON.back} ${p.can.studio ? 'Tablica' : 'Moje zlecenia'}</button>
+    <div class="hero" style="${bg}"><div class="hero-in">
+      <div class="id">${esc(p.id)} · zgłoszone ${fmtTs(p.createdAt)}</div>
+      <h1>${esc(p.title)}</h1>
+      <div class="tags"><span class="tag">${esc(p.status)}</span><span class="tag">${esc(p.brand)}</span><span class="tag">${ICON[p.category] || ''}<span style="text-transform:capitalize">${esc(p.category)}</span></span>
+        ${prio ? `<span class="tag"><span class="pdot p-${prio.key}"></span>${esc(prio.label)}</span>` : ''}<span class="tag due ${due.cls}" style="color:inherit">${ICON.clock}${esc(due.txt)}</span></div>
+    </div></div>
+    <div class="pgrid">
+      <div>
+        ${acceptedBanner(p)}
+        ${finalCard(p)}
+        ${decisionCard(p)}
+        ${revisionsCard(p)}
+        <div class="card sec"><div class="card-t">Brief</div><div class="brief">${esc(p.description)}</div></div>
+        <div class="card sec"><dl class="kv">
+          <dt>Format</dt><dd>${p.formats.map(f => `<span class="fmt" style="font-size:12px;margin-right:4px">${esc(f)}</span>`).join('')}</dd>
+          <dt>Platformy</dt><dd>${esc(p.platforms.join(', '))}</dd>
+          <dt>Materiały</dt><dd>${p.materialsLink ? `<a href="${esc(p.materialsLink)}" target="_blank" rel="noopener">${ICON.link} ${esc(p.materialsLink)}</a>` : '—'}</dd>
+          <dt>Publikacja</dt><dd>${p.publishDate ? esc(String(p.publishDate).split('-').reverse().join('.')) : '—'}</dd>
+          <dt>Zgłasza</dt><dd>${esc(p.requesterName)} · <a href="mailto:${esc(p.requesterEmail)}">${esc(p.requesterEmail)}</a></dd>
+          <dt>Owner</dt><dd><a href="mailto:${esc(p.ownerEmail)}">${esc(p.ownerEmail)}</a></dd>
+        </dl></div>
+        ${filesList.length ? `<div class="card sec"><div class="card-t">Pliki</div>${filesList.map(([f, k]) => `<button class="dl" data-file="${esc(f.id)}"><span class="muted">${k === 'Okładka' ? ICON.img : ICON.doc}</span><span class="nm">${esc(f.name)}</span><span class="dim" style="font-size:12px">${esc(k)}${f.size ? ' · ' + fmtSize(f.size) : ''}</span>${ICON.dl}</button>`).join('')}</div>` : ''}
+        ${p.timecodes.length ? `<div class="card sec"><div class="card-t">Czasówki</div><table class="tc-tab" style="margin:0"><tr><th>#</th><th>Od</th><th>Do</th><th>Długość</th><th>Opis</th></tr>${p.timecodes.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.from)}</td><td class="mono">${esc(r.to)}</td><td class="mono">${fmtDur(tcSec(r.to) - tcSec(r.from))}</td><td>${esc(r.note)}</td></tr>`).join('')}</table><div class="tc-sum"><span>${p.timecodes.length} fragmentów</span><span>Łącznie: <b style="color:var(--tx)">${fmtDur(tcSum)}</b></span></div></div>` : ''}
+        ${p.can.studio ? `<div class="card sec"><div class="card-t">Komentarze studia <span class="dim">· widzi tylko studio</span></div>
+          ${p.comments.map(c => `<div class="cm"><div class="ch"><span>${esc(c.authorName)}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy.</p>'}
+          <textarea class="in" id="cmIn" style="min-height:80px" placeholder="Notatka dla zespołu…"></textarea>
+          <div style="text-align:right;margin-top:10px"><button class="btn btn-g btn-sm" id="cmAdd">Dodaj komentarz</button></div></div>` : ''}
+      </div>
+      <aside class="side">
+        <div class="card">
+          <div class="card-t">Realizacja</div>
+          ${p.assigneeEmail ? `<div class="claimed"><span class="av lg">${initials(p.assigneeName)}</span><div><div class="nm">${esc(p.assigneeName)}</div><div class="sb">przyjął(-ęła) ${fmtTs(p.claimedAt)}</div></div></div>`
+            : p.can.claim ? `<button class="btn btn-p btn-lg claim" id="claim">Biorę to</button><div class="hint" style="text-align:center">Zadanie przypisze się do ${esc(B.user.email)}</div>`
+            : '<p class="muted" style="margin:0">Czeka na osobę ze studia.</p>'}
+          ${p.can.edit ? `<button class="btn-t btn" id="release" style="margin-top:10px;font-size:13px">Zwolnij zadanie</button>` : ''}
+        </div>
+        <div class="card">
+          <div class="card-t">Termin</div>
+          <dl class="kv" style="grid-template-columns:120px 1fr"><dt>Preferowany</dt><dd>${fmtDue(p.deadline)}</dd>
+          <dt>Potwierdzony</dt><dd>${p.confirmedDeadline ? '<b>' + fmtDue(p.confirmedDeadline) + '</b>' : '<span class="dim">jeszcze nie</span>'}</dd></dl>
+          ${p.can.edit ? `<div style="display:flex;gap:8px;margin-top:14px"><input class="in" type="datetime-local" id="cdIn" value="${esc(p.confirmedDeadline || p.deadline)}" style="padding:9px 10px"><button class="btn btn-g btn-sm" id="cdSave" style="height:42px">Potwierdź</button></div><div class="hint">Zgłaszający dostanie maila z terminem.</div>` : ''}
+        </div>
+        ${p.can.edit ? `<div class="card"><div class="card-t">Status</div><div class="st-chips">${B.statuses.map(s => `<button class="chip ${p.status === s ? 'on' : ''}" data-st="${esc(s)}">${esc(s)}</button>`).join('')}</div>
+          <div class="field" style="margin:16px 0 0"><label class="lbl">Link do gotowego materiału</label><div style="display:flex;gap:8px"><input class="in" id="dlIn" value="${esc(p.deliveryLink)}" placeholder="np. vimeo.com/…" style="padding:9px 12px"><button class="btn btn-g btn-sm" id="dlSave" style="height:42px">Zapisz</button></div></div></div>`
+          : p.deliveryLink ? `<div class="card"><div class="card-t">Gotowy materiał</div><a href="${esc(p.deliveryLink)}" target="_blank" rel="noopener">${ICON.link} ${esc(p.deliveryLink)}</a></div>` : ''}
+        <div class="card"><div class="card-t">Historia</div><div class="timeline">${p.history.slice().reverse().filter(h => h.action !== 'Mail' || p.can.studio).map(h => `<div class="tl"><i></i><div><div>${esc(h.action)}${h.details ? ' — <span class="muted">' + esc(h.details) + '</span>' : ''}</div><div class="tt">${fmtTs(h.ts)} · ${esc(h.actor)}</div></div></div>`).join('')}</div></div>
+      </aside>
+    </div></section>`;
+
+  const act = async (btn, fn, ok) => {
+    const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+    try { const np = await fn(); if (ok) toast(ok, 'ok'); drawProject(np); }
+    catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.innerHTML = old; if (/Już przyjął/.test(e.message)) viewProject(p.id); }
+  };
+  $('#claim') && ($('#claim').onclick = e => act(e.currentTarget, () => api('claimProject', p.id).then(np => { B.freeCount = Math.max(0, (B.freeCount || 0) - 1); renderTop(); return np; }), 'Zadanie jest Twoje. Zgłaszający dostał maila.'));
+  $('#release') && ($('#release').onclick = e => { if (confirm('Oddać to zadanie? Wróci jako wolne na tablicę.')) act(e.currentTarget, () => api('releaseProject', p.id), 'Zadanie zwolnione.'); });
+  $$('[data-st]').forEach(b => b.onclick = () => act(b, () => api('updateProject', p.id, { status: b.dataset.st, deliveryLink: $('#dlIn').value.trim() }), 'Status: ' + b.dataset.st));
+  $('#dlSave') && ($('#dlSave').onclick = e => act(e.currentTarget, () => api('updateProject', p.id, { deliveryLink: $('#dlIn').value.trim() }), 'Link zapisany.'));
+  $('#cdSave') && ($('#cdSave').onclick = e => act(e.currentTarget, () => api('updateProject', p.id, { confirmedDeadline: $('#cdIn').value }), 'Termin potwierdzony.'));
+  bindFinal(p);
+  $('#accept') && ($('#accept').onclick = e => act(e.currentTarget, () => api('acceptProject', p.id, TOK[p.id] || ''), 'Zaakceptowane. Dziękujemy!'));
+  $('#revSend') && ($('#revSend').onclick = e => {
+    const t = $('#revIn').value.trim();
+    if (t.length < 10) return toast('Opisz poprawki (min. 10 znaków).', 'bad');
+    act(e.currentTarget, () => api('requestRevision', p.id, t, TOK[p.id] || ''), 'Poprawki wysłane do studia.');
+  });
+  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t)); });
+  $$('[data-file]').forEach(b => b.onclick = async () => {
+    const old = b.innerHTML; b.style.opacity = .6;
+    try {
+      const f = await api('getFile', p.id, b.dataset.file, TOK[p.id] || '');
+      const bytes = Uint8Array.from(atob(f.b64), c => c.charCodeAt(0));
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: f.mime })); a.download = f.name;
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) { toast(e.message, 'bad'); }
+    b.style.opacity = 1; b.innerHTML = old;
+  });
+}
+
+// --- decyzja zgłaszającego: akceptacja albo poprawki ---
+
+function acceptedBanner(p) {
+  if (!p.acceptedAt) return '';
+  return `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div><div class="w5">Zaakceptowane ${fmtTs(p.acceptedAt)}</div><div class="muted" style="font-size:13px">Zlecenie zamknięte. Materiał zostaje tu do pobrania.</div></div></div>`;
+}
+
+function decisionCard(p) {
+  if (!p.can.decide) return '';
+  const max = p.maxRevisions, used = p.revisions.length, left = max - used;
+  return `<div class="card sec decide"><div class="card-t">Twoja decyzja</div>
+    <p class="muted" style="margin:0 0 16px;font-size:14px">Obejrzyj materiał. Jeśli wszystko gra, zaakceptuj, a zlecenie się zamknie i materiał zostanie tu do pobrania. Jeśli coś trzeba zmienić, opisz poprawki.</p>
+    <button class="btn btn-p btn-lg" id="accept" style="width:100%">Akceptuję</button>
+    <div class="rev ${left <= 0 ? 'off' : ''}">
+      <label class="lbl" style="margin-top:22px">Poprawki <span class="rev-left ${left <= 0 ? 'none' : ''}">${left > 0 ? `tura ${used + 1} z ${max}` : `wykorzystano ${max} z ${max}`}</span></label>
+      <textarea class="in" id="revIn" ${left <= 0 ? 'disabled' : ''} placeholder="${left > 0 ? 'Co dokładnie zmienić? Najlepiej z czasówkami, np. 00:12 – skrócić ujęcie sali' : 'Limit poprawek został wykorzystany'}" style="min-height:110px"></textarea>
+      <div class="hint">Przysługują maksymalnie <b>${max} tury poprawek</b>. ${left > 0 ? `Zostało: <b>${left} z ${max}</b>.${left === 1 ? ' To ostatnia tura — po jej wysłaniu pole wygaśnie.' : ' Po wykorzystaniu limitu pole wygaśnie.'}` : `Limit wykorzystany — pole jest zablokowane. Dalsze zmiany ustal bezpośrednio z osobą realizującą${p.assigneeName ? ' (' + esc(p.assigneeName) + ')' : ''}.`}</div>
+      <div style="text-align:right;margin-top:10px"><button class="btn btn-g" id="revSend" ${left <= 0 ? 'disabled' : ''}>Wyślij poprawki</button></div>
+    </div></div>`;
+}
+
+function revisionsCard(p) {
+  if (!p.revisions.length) return '';
+  return `<div class="card sec"><div class="card-t">Poprawki <span class="dim">· ${p.revisions.length} z ${p.maxRevisions} tur</span></div>
+    ${p.revisions.map(r => `<div class="cm"><div class="ch"><span>Tura ${r.n} z ${p.maxRevisions}</span><span>${fmtTs(r.at)}</span></div><div class="cb">${esc(r.text)}</div></div>`).join('')}</div>`;
+}
+
+// --- plik finalny: upload kawałkami po 4 MB prosto do Drive, podgląd w odtwarzaczu Drive ---
+
+const FINAL_CHUNK = 4 * 1024 * 1024; // wielokrotność 256 KB (wymóg uploadu wznawialnego Drive)
+// Uwaga: w tym pliku nie może wystąpić ukośnik z gwiazdką — Apps Script bierze go za komentarz i ucina resztę strony.
+const FINAL_EXT = ['mp4', 'mov', 'm4v', 'webm', 'mxf', 'jpg', 'jpeg', 'png', 'gif', 'pdf'];
+let FUP = null; // trwający upload: { projectId, name, size, sent }
+
+function finalCard(p) {
+  const f = p.finalFile;
+  const up = FUP && FUP.projectId === p.id;
+  const preview = f ? `<div class="final-prev"><iframe src="${DRIVE_FILE}${encodeURIComponent(f.id)}/preview" allow="autoplay; fullscreen" allowfullscreen loading="lazy"></iframe></div>
+      <div class="final-meta"><span>${esc(f.name)} · ${fmtSize(f.size)} · ${esc(f.by || '')} ${fmtTs(f.at)}</span><span style="display:flex;gap:14px"><a href="${PROTO}drive.google.com/uc?export=download&id=${encodeURIComponent(f.id)}" target="_blank" rel="noopener">${ICON.dl} Pobierz</a><a href="${DRIVE_FILE}${encodeURIComponent(f.id)}/view" target="_blank" rel="noopener">${ICON.link} Otwórz w Drive</a></span></div>
+      <div class="hint">Świeżo wrzucone wideo Drive przetwarza kilka minut — jeśli podgląd jest pusty, odśwież za chwilę.</div>` : '';
+  const progress = up ? `<div class="file" style="margin-top:12px"><div style="flex:1;min-width:0"><div class="nm">${esc(FUP.name)}</div><div class="bar"><i id="fupBar" style="width:${Math.round(FUP.sent / FUP.size * 100)}%"></i></div></div><span class="sz" id="fupTxt">${fmtSize(FUP.sent)} / ${fmtSize(FUP.size)}</span></div>` : '';
+  const drop = p.can.edit && !up ? `<label class="dz" data-final style="margin-top:${f ? 14 : 0}px"><input type="file" accept=".mp4,.mov,.m4v,.webm,.mxf,.jpg,.jpeg,.png,.gif,.pdf"><div class="ic">${ICON.up}</div><div class="t1">${f ? 'Podmień plik finalny' : 'Wrzuć plik finalny do wglądu'}</div><div class="t2">.mp4 .mov .webm .jpg .png .pdf · do 2 GB · zgłaszający zobaczy go na tej stronie</div></label>` : '';
+  if (!f && !p.can.edit) return `<div class="card sec"><div class="card-t">Materiał finalny</div><p class="muted" style="margin:0;font-size:14px">Gotowy materiał pojawi się tutaj do obejrzenia, gdy studio skończy montaż.</p></div>`;
+  return `<div class="card sec" id="finalCard"><div class="card-t">Materiał finalny ${f ? '' : '<span class="dim">· jeszcze nie ma</span>'}</div>${preview}${progress}${drop}</div>`;
+}
+
+function bindFinal(p) {
+  const dz = $('[data-final]');
+  if (!dz) return;
+  const inp = $('input', dz);
+  const go = file => file && uploadFinal(p, file);
+  inp.onchange = () => go(inp.files[0]);
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+  dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag'); go(e.dataTransfer.files[0]); });
+}
+
+async function uploadFinal(p, file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!FINAL_EXT.includes(ext)) return toast('Niedozwolony typ pliku: .' + ext, 'bad');
+  if (file.size > 2 * 1024 ** 3) return toast('Plik finalny może mieć maks. 2 GB.', 'bad');
+  FUP = { projectId: p.id, name: file.name, size: file.size, sent: 0 };
+  drawProject(p);
+  window.addEventListener('beforeunload', warnLeave);
+  try {
+    const id = await api('startFinalUpload', p.id, file.name, file.type || 'application/octet-stream', file.size);
+    let offset = 0, res = null;
+    while (offset < file.size) {
+      const b64 = await readB64(file.slice(offset, offset + FINAL_CHUNK));
+      res = await api('uploadFinalChunk', id, offset, b64);
+      offset = res.done ? file.size : res.next;
+      FUP.sent = offset;
+      if ($('#fupBar')) { $('#fupBar').style.width = Math.round(offset / file.size * 100) + '%'; $('#fupTxt').textContent = fmtSize(offset) + ' / ' + fmtSize(file.size); }
+    }
+    FUP = null;
+    toast('Plik finalny wrzucony.', 'ok');
+    if (route === '/projekt/' + p.id || route === '/projekt/' + encodeURIComponent(p.id)) drawProject(res.project);
+  } catch (e) {
+    FUP = null; toast(e.message, 'bad'); drawProject(p);
+  }
+  window.removeEventListener('beforeunload', warnLeave);
+}
+function warnLeave(e) { e.preventDefault(); e.returnValue = ''; }
+
+// ================= USTAWIENIA =================
+
+async function viewSettings() {
+  $('#app').innerHTML = `<section class="view"><div class="eyebrow">Admin</div><h1 class="h1">Ustawienia</h1><p class="lead">Kto widzi tablicę, presety terminów i dni wolne.</p><div id="set">${skeleton(2)}</div></section>`;
+  try { drawSettings(await api('getSettings')); } catch (e) { $('#set').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+function drawSettings(s) {
+  const today = nowWaw().date;
+  const upcoming = s.holidays.filter(h => h.date >= today).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 16);
+  $('#set').innerHTML = `<div class="set-grid">
+    <div class="card"><div class="card-t">Dostęp do tablicy</div>
+      <table class="tbl"><tr><th>Osoba</th><th>Rola</th><th></th></tr>${s.access.map(a => `<tr><td><div>${esc(a.name)}</div><div class="dim" style="font-size:12px">${esc(a.email)}</div></td><td><span class="role ${a.role === 'admin' ? 'admin' : ''}">${esc(a.role)}</span></td><td style="text-align:right">${a.email !== B.user.email ? `<button class="x" data-rmacc="${esc(a.email)}" title="Usuń dostęp">${ICON.x}</button>` : ''}</td></tr>`).join('')}</table>
+      <div class="add-row"><input class="in" id="aEmail" placeholder="imie.nazwisko@tc.pl"><input class="in" id="aName" placeholder="Imię i nazwisko"><select class="sel" id="aRole"><option value="studio">studio</option><option value="admin">admin</option></select><button class="btn btn-p btn-sm" id="aAdd" style="height:40px">Dodaj</button></div>
+      <div class="hint">Nowa osoba dostaje dostęp do tablicy i maile o nowych zleceniach.</div>
+    </div>
+    <div>
+      <div class="card" style="margin-bottom:20px"><div class="card-t">Presety terminów <span class="dim">· dni robocze</span></div>
+        <div class="pre-head"><span>Nazwa</span><span>Etykieta</span><span>Dni</span><span>Do godz.</span><span></span></div>
+        <div id="pre">${s.presets.map(p => preRow(p)).join('')}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:10px"><button class="btn-t btn" id="preAdd">+ dodaj preset</button><button class="btn btn-g btn-sm" id="preSave">Zapisz presety</button></div>
+        <div class="hint">Nazwa · etykieta · dni robocze · „do godz." (np. 12 przy avatarze: zgłoszone przed 12:00 → gotowe tego samego dnia).</div></div>
+      <div class="card"><div class="card-t">Dni wolne</div>
+        ${upcoming.map(h => `<div class="hol"><span>${esc(h.date.split('-').reverse().join('.'))} · <span class="muted">${esc(h.name)}</span></span><button class="x" data-rmhol="${esc(h.date)}">${ICON.x}</button></div>`).join('')}
+        <div style="display:flex;gap:8px;margin-top:12px"><input class="in" type="date" id="hDate" style="padding:8px 10px"><input class="in" id="hName" placeholder="np. wyjazd firmowy" style="padding:8px 10px"><button class="btn btn-g btn-sm" id="hAdd" style="height:40px">Dodaj</button></div>
+      </div>
+    </div></div>`;
+  const run = async (fn, ok) => { try { drawSettings(await fn()); if (ok) toast(ok, 'ok'); } catch (e) { toast(e.message, 'bad'); } };
+  $('#aAdd').onclick = () => run(() => api('addAccess', $('#aEmail').value, $('#aName').value, $('#aRole').value), 'Dodano dostęp.');
+  $$('[data-rmacc]').forEach(b => b.onclick = () => { if (confirm('Usunąć dostęp dla ' + b.dataset.rmacc + '?')) run(() => api('removeAccess', b.dataset.rmacc), 'Usunięto dostęp.'); });
+  $('#preAdd').onclick = () => $('#pre').insertAdjacentHTML('beforeend', preRow({ label: '', hint: '', days: 1 }));
+  $('#pre').onclick = e => { const x = e.target.closest('[data-rmpre]'); if (x) x.closest('.pre-row').remove(); };
+  $('#preSave').onclick = () => {
+    const list = $$('#pre .pre-row').map(r => ({ key: r.dataset.key, label: $('[data-p=label]', r).value.trim(), hint: $('[data-p=hint]', r).value.trim(), days: Number($('[data-p=days]', r).value), cutoff: Number($('[data-p=cutoff]', r).value) || 0 })).filter(p => p.label);
+    run(() => api('savePresets', list), 'Presety zapisane.').then(() => { B.presets = list; });
+  };
+  $('#hAdd').onclick = () => run(() => api('addHoliday', $('#hDate').value, $('#hName').value), 'Dodano dzień wolny.').then(refreshHol);
+  $$('[data-rmhol]').forEach(b => b.onclick = () => run(() => api('removeHoliday', b.dataset.rmhol)).then(refreshHol));
+}
+function preRow(p) { return `<div class="pre-row" data-key="${esc(p.key || '')}"><input class="in" data-p="label" value="${esc(p.label)}" placeholder="Rolka"><input class="in" data-p="hint" value="${esc(p.hint || '')}" placeholder="24 h"><input class="in" data-p="days" type="number" min="1" max="60" value="${p.days}" title="dni robocze"><input class="in" data-p="cutoff" type="number" min="10" max="17" value="${p.cutoff || ''}" placeholder="—" title="zgłoszone przed tą godziną → pierwszy dzień liczy się już dziś"><button class="x" data-rmpre title="Usuń">${ICON.x}</button></div>`; }
+async function refreshHol() { try { const b = await api('getBootstrap'); HOL = b.holidays.map(h => h.date); B.holidays = b.holidays; } catch (e) {} }
+
+// ================= START =================
+
+(async function start() {
+  window.__stzStarted = true;
+  if (window.TC_LOGO) $('#logo').src = window.TC_LOGO;
+  try {
+    B = await api('getBootstrap');
+  } catch (e) {
+    $('#app').innerHTML = `<div class="boot"><div style="text-align:center;max-width:420px"><div class="h1" style="font-size:22px">Brak dostępu</div><p class="muted">${esc(e.message)}</p></div></div>`;
+    return;
+  }
+  HOL = B.holidays.map(h => h.date);
+  $('#top').hidden = false;
+  google.script.history.setChangeHandler(e => render(e.location.hash));
+  google.script.url.getLocation(loc => {
+    const p = loc.parameter && loc.parameter.p;
+    if (p && loc.parameter.t) { TOK[p] = loc.parameter.t; saveTok(); }
+    render(loc.hash || (p ? '/projekt/' + p : ''));
+  });
+  if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop(); }).catch(() => {});
+})();
+</script>

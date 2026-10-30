@@ -1,0 +1,8 @@
+name = "zlecenia-studio"
+account_id = "8f4750a4d829a5e4c0d8b021e7a0932a"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+routes = [
+  { pattern = "zlecenia-studio.tc.pl", custom_domain = true }
+]
