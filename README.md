@@ -1,6 +1,6 @@
 # Studio TC · Portal zleceń
 
-**Link:** https://script.google.com/a/macros/tc.pl/s/AKfycbxCuqT-codSSs1sPCR8WEH7U4sRDiSMIxEfX9Oalc8FjnVsh4FtuqDEAD1wcoAFHz1G/exec
+**Link:** https://zlecenia-studio.tc.pl (przekierowanie przez Cloudflare Worker z `redirect/`)
 GitHub: https://github.com/thecompany-pl/studio-zlecenia (prywatne; kod na gałęzi `portal-zlecen-v1`, `main` czeka na admina org.)
 Script ID: 1y99UFhAKYBabtICYRJIu2E40B9U2qJbbTZX_tPJYODRSCHfH4Kq5PweQ · Deployment: `AKfycbxCuqT-codSSs1sPCR8WEH7U4sRDiSMIxEfX9Oalc8FjnVsh4FtuqDEAD1wcoAFHz1G`
 

@@ -7,4 +7,3 @@ cd ~/Desktop/CLAUDE/Studio_Zlecenia/redirect && ./node_modules/.bin/wrangler dep
 ```
 
 Wymaga w koncie Cloudflare „The Company" uprawnień Workers (Scripts + Routes – Edit) i DNS – Edit dla tc.pl.
-Wdrożenie wymaga roli Cloudflare z uprawnieniem Workers Scripts: Edit i dostępem do strefy tc.pl.

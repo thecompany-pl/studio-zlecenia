@@ -43,7 +43,9 @@ function getAsset(name) {
 function props_() { return PropertiesService.getScriptProperties(); }
 function prop_(k) { return props_().getProperty(k); }
 
-function appUrl_() { return ScriptApp.getService().getUrl(); }
+// Krótki adres (Cloudflare Worker w redirect/ przekierowuje na ScriptApp.getService().getUrl()).
+var PUBLIC_URL = 'https://zlecenia-studio.tc.pl/';
+function appUrl_() { return PUBLIC_URL; }
 
 // Uruchamia się samo przy pierwszym wejściu właściciela; można też odpalić ręcznie z edytora.
 var SCHEMA_VERSION = '2';
