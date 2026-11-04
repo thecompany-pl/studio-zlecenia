@@ -680,10 +680,10 @@ function drawProject(p) {
         </dl></div>
         ${filesList.length ? `<div class="card sec"><div class="card-t">Pliki</div>${filesList.map(([f, k]) => `<button class="dl" data-file="${esc(f.id)}"><span class="muted">${k === 'Okładka' ? ICON.img : ICON.doc}</span><span class="nm">${esc(f.name)}</span><span class="dim" style="font-size:12px">${esc(k)}${f.size ? ' · ' + fmtSize(f.size) : ''}</span>${ICON.dl}</button>`).join('')}</div>` : ''}
         ${p.timecodes.length ? `<div class="card sec"><div class="card-t">Czasówki</div><table class="tc-tab" style="margin:0"><tr><th>#</th><th>Od</th><th>Do</th><th>Długość</th><th>Opis</th></tr>${p.timecodes.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.from)}</td><td class="mono">${esc(r.to)}</td><td class="mono">${fmtDur(tcSec(r.to) - tcSec(r.from))}</td><td>${esc(r.note)}</td></tr>`).join('')}</table><div class="tc-sum"><span>${p.timecodes.length} fragmentów</span><span>Łącznie: <b style="color:var(--tx)">${fmtDur(tcSum)}</b></span></div></div>` : ''}
-        ${p.can.studio ? `<div class="card sec"><div class="card-t">Komentarze studia <span class="dim">· widzi tylko studio</span></div>
-          ${p.comments.map(c => `<div class="cm"><div class="ch"><span>${esc(c.authorName)}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy.</p>'}
-          <textarea class="in" id="cmIn" style="min-height:80px" placeholder="Notatka dla zespołu…"></textarea>
-          <div style="text-align:right;margin-top:10px"><button class="btn btn-g btn-sm" id="cmAdd">Dodaj komentarz</button></div></div>` : ''}
+        <div class="card sec"><div class="card-t">Komentarze <span class="dim">· widzi studio i zgłaszający</span></div>
+          ${p.comments.map(c => `<div class="cm${c.studio ? ' cm-st' : ''}"><div class="ch"><span>${esc(c.authorName)}${c.studio ? ' <span class="cm-tag">Studio</span>' : ''}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy. Tu możecie omawiać szczegóły zlecenia.</p>'}
+          <textarea class="in" id="cmIn" style="min-height:80px" placeholder="${p.can.studio ? 'Napisz do zgłaszającego…' : 'Napisz do studia…'}"></textarea>
+          <div style="text-align:right;margin-top:10px"><button class="btn btn-g btn-sm" id="cmAdd">Dodaj komentarz</button></div></div>
       </div>
       <aside class="side">
         <div class="card">
@@ -723,7 +723,7 @@ function drawProject(p) {
     if (t.length < 10) return toast('Opisz poprawki (min. 10 znaków).', 'bad');
     act(e.currentTarget, () => api('requestRevision', p.id, t, TOK[p.id] || ''), 'Poprawki wysłane do studia.');
   });
-  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t)); });
+  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, TOK[p.id] || ''), 'Komentarz dodany.'); });
   $$('[data-file]').forEach(b => b.onclick = async () => {
     const old = b.innerHTML; b.style.opacity = .6;
     try {

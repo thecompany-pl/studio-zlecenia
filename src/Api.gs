@@ -155,6 +155,7 @@ function getProject(id, token) {
   var r = findProject_(id);
   if (!r || !canSee_(u, r, token)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
   var studio = isStudio_(u);
+  var staff = rows_('Dostep').filter(isStudio_).map(function (a) { return String(a.email).toLowerCase(); });
   var out = {
     id: r.id, createdAt: r.createdAt, updatedAt: r.updatedAt, status: r.status, title: r.title, description: r.description,
     requesterName: r.requesterName, requesterEmail: r.requesterEmail, ownerEmail: r.ownerEmail, brand: r.brand,
@@ -169,8 +170,8 @@ function getProject(id, token) {
     revisions: json_(r.revisions, []), maxRevisions: MAX_REVISIONS, acceptedAt: r.acceptedAt, acceptedBy: r.acceptedBy,
     history: rows_('Historia').filter(function (h) { return h.projectId === id; })
       .map(function (h) { return { ts: h.ts, actor: h.actor, action: h.action, details: h.details }; }),
-    comments: studio ? rows_('Komentarze').filter(function (c) { return c.projectId === id; })
-      .map(function (c) { return { ts: c.ts, authorName: c.authorName, authorEmail: c.authorEmail, text: c.text }; }) : [],
+    comments: rows_('Komentarze').filter(function (c) { return c.projectId === id; })
+      .map(function (c) { return { ts: c.ts, authorName: c.authorName, authorEmail: c.authorEmail, text: c.text, studio: staff.indexOf(String(c.authorEmail).toLowerCase()) >= 0 }; }),
     can: {
       decide: canDecide_(u, r, token) && r.status === 'Do akceptacji',
       studio: studio,
@@ -300,13 +301,16 @@ function updateProject(id, patch) {
   return getProject(id);
 }
 
-function addComment(id, text) {
-  var u = requireStudio_();
+// Dyskusja pod zleceniem: studio + zgłaszający/owner (także z linkiem z maila). Druga strona dostaje maila.
+function addComment(id, text, token) {
+  var u = me_();
   text = String(text || '').trim().slice(0, 4000);
   if (!text) throw new Error('Pusty komentarz.');
-  if (!findProject_(id)) throw new Error('Nie znaleziono zlecenia.');
+  var r = findProject_(id);
+  if (!r || !canSee_(u, r, token)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
   append_('Komentarze', { ts: nowIso_(), projectId: id, authorEmail: u.email, authorName: u.name, text: text });
-  return getProject(id);
+  sendCommentMail_(r, text, u, isStudio_(u));
+  return getProject(id, token);
 }
 
 // --- plik finalny: upload wznawialny prosto do Drive (kawałki po 4 MB, bez sklejania w pamięci) ---
