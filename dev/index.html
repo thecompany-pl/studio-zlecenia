@@ -209,6 +209,8 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .due.soon{color:var(--warn)}
 .due.late{color:var(--bad)}
 .due.fin{color:var(--ok)}
+.due.rej{color:var(--mut)}
+[hidden]{display:none!important}
 .free{font-size:11.5px;padding:4px 10px;border-radius:999px;border:1px dashed var(--acc);color:var(--acc2);font-weight:500}
 .who{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--mut)}
 .who .av{width:26px;height:26px;font-size:10.5px}
@@ -247,6 +249,8 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .cm{padding:12px 14px;border-radius:12px;background:var(--card2);border:1px solid var(--line);margin-bottom:8px}
 .cm .ch{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-bottom:4px}
 .cm .cb{white-space:pre-wrap;font-size:14px}
+.cm-st{background:#fff6f7;border-color:#f6d3d9}
+.cm-tag{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:var(--acc);color:#fff;font-size:10.5px;font-weight:500;vertical-align:1px}
 .dl{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card2);width:100%;text-align:left;margin-bottom:8px;transition:.2s}
 .dl:hover{border-color:rgba(17,17,26,.25);background:#fff}
 .dl .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
@@ -259,6 +263,12 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .ok-banner{display:flex;align-items:center;gap:14px;border-color:rgba(15,157,107,.35)}
 .ok-dot{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:rgba(15,157,107,.1);color:var(--ok);flex-shrink:0}
 .ok-dot svg{width:20px;height:20px}
+.rej-banner{display:flex;align-items:flex-start;gap:14px;border-color:rgba(220,20,60,.35)}
+.rej-dot{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:rgba(220,20,60,.08);color:var(--acc);flex-shrink:0;font-size:16px}
+.rej-dot svg{width:18px;height:18px}
+.rej-why{margin-top:4px;font-size:14px;white-space:pre-wrap;color:var(--tx)}
+.rej-open{margin-top:6px;font-size:13px;color:var(--bad)}
+.btn-rej{background:var(--acc);color:#fff;border:0}
 .final-meta{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:12.5px;color:var(--mut)}
 
 /* --- ustawienia --- */
@@ -473,8 +483,10 @@ function nowWaw() {
     .formatToParts(new Date()).map(x => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) + Number(p.minute) / 60 };
 }
+const closed = t => t.status === 'Gotowe' || t.status === 'Odrzucone';
 function dueInfo(t) {
   if (t.status === 'Gotowe') return { cls: 'fin', txt: 'gotowe' };
+  if (t.status === 'Odrzucone') return { cls: 'rej', txt: 'odrzucone' };
   const iso = t.confirmedDeadline || t.deadline;
   if (!iso) return { cls: '', txt: '—' };
   const ymd = iso.slice(0, 10), n = nowWaw(), hour = Number(iso.slice(11, 13)) || 17;
@@ -989,7 +1001,7 @@ async function viewBoard() {
   const app = $('#app');
   app.innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Studio</div><h1 class="h1">Tablica zleceń</h1></div><div class="stats" id="stats"></div></div><div id="filters"></div><div id="tiles">${skeleton()}</div></section>`;
   try { BOARD = await api('listBoard'); } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
-  B.freeCount = BOARD.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop();
+  B.freeCount = BOARD.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop();
   drawBoard();
 }
 
@@ -1000,7 +1012,7 @@ function drawBoard() {
   $('#stats').innerHTML = [['Nowe', cnt('Nowe')], ['W realizacji', cnt('W realizacji')], ['Do akceptacji', cnt('Do akceptacji')], ['Wolne', B.freeCount]]
     .map(([k, v]) => `<div class="stat"><div class="sv">${v}</div><div class="sk">${k}</div></div>`).join('');
   $('#filters').innerHTML = `<div class="filters">
-    ${fc('status', 'aktywne', 'Aktywne')}${B.statuses.map(s => fc('status', s)).join('')}${fc('status', '', 'Wszystkie')}
+    ${fc('status', 'aktywne', 'Aktywne')}${B.statuses.concat('Odrzucone').map(s => fc('status', s)).join('')}${fc('status', '', 'Wszystkie')}
     <span class="sep"></span>${fc('who', 'moje', 'Moje')}${fc('who', 'wolne', 'Wolne')}
     <span class="sep"></span>
     <select class="sel" data-fsel="brand"><option value="">Każdy brand</option>${B.brands.map(b => `<option ${F.brand === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>
@@ -1018,7 +1030,7 @@ function drawTiles() {
   const PR = { krytyczny: 0, wysoki: 1, 'średni': 2, niski: 3 };
   const q = F.q.trim().toLowerCase();
   let list = BOARD.filter(t =>
-    (F.status === 'aktywne' ? t.status !== 'Gotowe' : !F.status || t.status === F.status) &&
+    (F.status === 'aktywne' ? !closed(t) : !F.status || t.status === F.status) &&
     (!F.brand || t.brand === F.brand) && (!F.category || t.category === F.category) &&
     (F.who !== 'moje' || t.assigneeEmail === B.user.email) && (F.who !== 'wolne' || !t.assigneeEmail) &&
     (!q || (t.title + ' ' + t.id).toLowerCase().includes(q)));
@@ -1033,11 +1045,14 @@ function drawTiles() {
 // ================= MOJE ZLECENIA =================
 
 async function viewMine() {
-  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Twoje</div><h1 class="h1">Moje zlecenia</h1><p class="lead" style="margin:0">Zlecenia, które zgłosiłeś(-aś) albo w których jesteś ownerem.</p></div><button class="btn btn-p" data-go="/nowe">Nowe zlecenie</button></div><div id="tiles">${skeleton(3)}</div></section>`;
+  const studio = B.user.role !== 'user';
+  const lead = studio ? 'Zlecenia, które przyjąłeś(-ęłaś) do realizacji.' : 'Zlecenia, które zgłosiłeś(-aś) albo w których jesteś ownerem.';
+  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Twoje</div><h1 class="h1">Moje zlecenia</h1><p class="lead" style="margin:0">${lead}</p></div><button class="btn btn-p" data-go="/nowe">Nowe zlecenie</button></div><div id="tiles">${skeleton(3)}</div></section>`;
   try {
     const list = (await api('listMine')).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     $('#tiles').innerHTML = list.length ? `<div class="grid">${list.map((t, i) => tileHtml(t, false, i)).join('')}</div>`
-      : `<div class="empty"><div class="h">Nie masz jeszcze zleceń</div>Zgłoś pierwsze — zajmie Ci to 3 minuty.</div>`;
+      : studio ? `<div class="empty"><div class="h">Nie masz przyjętych zleceń</div>Wybierz zlecenie z tablicy i kliknij „Biorę to”.</div>`
+        : `<div class="empty"><div class="h">Nie masz jeszcze zleceń</div>Zgłoś pierwsze — zajmie Ci to 3 minuty.</div>`;
   } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -1068,7 +1083,7 @@ function drawProject(p) {
     </div></div>
     <div class="pgrid">
       <div>
-        ${acceptedBanner(p)}
+        ${acceptedBanner(p)}${rejectedBanner(p)}
         ${finalCard(p)}
         ${decisionCard(p)}
         ${revisionsCard(p)}
@@ -1083,10 +1098,10 @@ function drawProject(p) {
         </dl></div>
         ${filesList.length ? `<div class="card sec"><div class="card-t">Pliki</div>${filesList.map(([f, k]) => `<button class="dl" data-file="${esc(f.id)}"><span class="muted">${k === 'Okładka' ? ICON.img : ICON.doc}</span><span class="nm">${esc(f.name)}</span><span class="dim" style="font-size:12px">${esc(k)}${f.size ? ' · ' + fmtSize(f.size) : ''}</span>${ICON.dl}</button>`).join('')}</div>` : ''}
         ${p.timecodes.length ? `<div class="card sec"><div class="card-t">Czasówki</div><table class="tc-tab" style="margin:0"><tr><th>#</th><th>Od</th><th>Do</th><th>Długość</th><th>Opis</th></tr>${p.timecodes.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.from)}</td><td class="mono">${esc(r.to)}</td><td class="mono">${fmtDur(tcSec(r.to) - tcSec(r.from))}</td><td>${esc(r.note)}</td></tr>`).join('')}</table><div class="tc-sum"><span>${p.timecodes.length} fragmentów</span><span>Łącznie: <b style="color:var(--tx)">${fmtDur(tcSum)}</b></span></div></div>` : ''}
-        ${p.can.studio ? `<div class="card sec"><div class="card-t">Komentarze studia <span class="dim">· widzi tylko studio</span></div>
-          ${p.comments.map(c => `<div class="cm"><div class="ch"><span>${esc(c.authorName)}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy.</p>'}
-          <textarea class="in" id="cmIn" style="min-height:80px" placeholder="Notatka dla zespołu…"></textarea>
-          <div style="text-align:right;margin-top:10px"><button class="btn btn-g btn-sm" id="cmAdd">Dodaj komentarz</button></div></div>` : ''}
+        <div class="card sec"><div class="card-t">Komentarze <span class="dim">· widzi studio i zgłaszający</span></div>
+          ${p.comments.map(c => `<div class="cm${c.studio ? ' cm-st' : ''}"><div class="ch"><span>${esc(c.authorName)}${c.studio ? ' <span class="cm-tag">Studio</span>' : ''}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy. Tu możecie omawiać szczegóły zlecenia.</p>'}
+          <textarea class="in" id="cmIn" style="min-height:80px" placeholder="${p.can.studio ? 'Napisz do zgłaszającego…' : 'Napisz do studia…'}"></textarea>
+          <div style="text-align:right;margin-top:10px"><button class="btn btn-g btn-sm" id="cmAdd">Dodaj komentarz</button></div></div>
       </div>
       <aside class="side">
         <div class="card">
@@ -1095,6 +1110,11 @@ function drawProject(p) {
             : p.can.claim ? `<button class="btn btn-p btn-lg claim" id="claim">Biorę to</button><div class="hint" style="text-align:center">Zadanie przypisze się do ${esc(B.user.email)}</div>`
             : '<p class="muted" style="margin:0">Czeka na osobę ze studia.</p>'}
           ${p.can.edit ? `<button class="btn-t btn" id="release" style="margin-top:10px;font-size:13px">Zwolnij zadanie</button>` : ''}
+          ${p.can.reject ? `<button class="btn-t btn rej-open" id="rejOpen">Odrzuć zlecenie</button>
+            <div id="rejBox" hidden><label class="lbl" style="margin-top:14px">Powód odrzucenia</label>
+            <textarea class="in" id="rejIn" style="min-height:90px" placeholder="Np. brak materiałów, termin niemożliwy do realizacji, zlecenie poza zakresem studia…"></textarea>
+            <div class="hint">Uzasadnienie jest wymagane i trafi mailem do zgłaszającego.</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g btn-sm" id="rejCancel">Anuluj</button><button class="btn btn-sm btn-rej" id="rejSend">Odrzuć i wyślij</button></div></div>` : ''}
         </div>
         <div class="card">
           <div class="card-t">Termin</div>
@@ -1115,6 +1135,13 @@ function drawProject(p) {
     catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.innerHTML = old; if (/Już przyjął/.test(e.message)) viewProject(p.id); }
   };
   $('#claim') && ($('#claim').onclick = e => act(e.currentTarget, () => api('claimProject', p.id).then(np => { B.freeCount = Math.max(0, (B.freeCount || 0) - 1); renderTop(); return np; }), 'Zadanie jest Twoje. Zgłaszający dostał maila.'));
+  $('#rejOpen') && ($('#rejOpen').onclick = () => { $('#rejBox').hidden = false; $('#rejOpen').hidden = true; $('#rejIn').focus(); });
+  $('#rejCancel') && ($('#rejCancel').onclick = () => { $('#rejBox').hidden = true; $('#rejOpen').hidden = false; });
+  $('#rejSend') && ($('#rejSend').onclick = e => {
+    const t = $('#rejIn').value.trim();
+    if (t.length < 10) return toast('Uzasadnij odrzucenie (min. 10 znaków).', 'bad');
+    act(e.currentTarget, () => api('rejectProject', p.id, t), 'Zlecenie odrzucone, zgłaszający dostał maila.');
+  });
   $('#release') && ($('#release').onclick = e => { if (confirm('Oddać to zadanie? Wróci jako wolne na tablicę.')) act(e.currentTarget, () => api('releaseProject', p.id), 'Zadanie zwolnione.'); });
   $$('[data-st]').forEach(b => b.onclick = () => act(b, () => api('updateProject', p.id, { status: b.dataset.st, deliveryLink: $('#dlIn').value.trim() }), 'Status: ' + b.dataset.st));
   $('#dlSave') && ($('#dlSave').onclick = e => act(e.currentTarget, () => api('updateProject', p.id, { deliveryLink: $('#dlIn').value.trim() }), 'Link zapisany.'));
@@ -1126,7 +1153,7 @@ function drawProject(p) {
     if (t.length < 10) return toast('Opisz poprawki (min. 10 znaków).', 'bad');
     act(e.currentTarget, () => api('requestRevision', p.id, t, TOK[p.id] || ''), 'Poprawki wysłane do studia.');
   });
-  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t)); });
+  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, TOK[p.id] || ''), 'Komentarz dodany.'); });
   $$('[data-file]').forEach(b => b.onclick = async () => {
     const old = b.innerHTML; b.style.opacity = .6;
     try {
@@ -1144,6 +1171,11 @@ function drawProject(p) {
 function acceptedBanner(p) {
   if (!p.acceptedAt) return '';
   return `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div><div class="w5">Zaakceptowane ${fmtTs(p.acceptedAt)}</div><div class="muted" style="font-size:13px">Zlecenie zamknięte. Materiał zostaje tu do pobrania.</div></div></div>`;
+}
+
+function rejectedBanner(p) {
+  if (p.status !== 'Odrzucone') return '';
+  return `<div class="card sec rej-banner"><span class="rej-dot">${ICON.x || '✕'}</span><div><div class="w5">Zlecenie odrzucone ${fmtTs(p.rejectedAt)}${p.rejectedBy ? ' · ' + esc(p.rejectedBy) : ''}</div><div class="rej-why">${esc(p.rejectReason)}</div></div></div>`;
 }
 
 function decisionCard(p) {
@@ -1284,7 +1316,7 @@ async function refreshHol() { try { const b = await api('getBootstrap'); HOL = b
     if (p && loc.parameter.t) { TOK[p] = loc.parameter.t; saveTok(); }
     render(loc.hash || (p ? '/projekt/' + p : ''));
   });
-  if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop(); }).catch(() => {});
+  if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop(); }).catch(() => {});
 })();
 </script>
 

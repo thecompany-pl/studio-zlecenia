@@ -38,7 +38,7 @@
   try { const saved = JSON.parse(sessionStorage.getItem('mockP3') || 'null'); if (saved) { P.splice(0, P.length, ...saved.P); seq = saved.seq; } } catch (e) {}
   const persist = () => { try { sessionStorage.setItem('mockP3', JSON.stringify({ P, seq })); } catch (e) {} };
   const tile = p => ({ id: p.id, title: p.title, status: p.status, brand: p.brand, category: p.category, formats: p.formats, priority: p.priority, deadline: p.deadline, confirmedDeadline: p.confirmedDeadline, assigneeEmail: p.assigneeEmail, assigneeName: p.assigneeName, requesterName: p.requesterName, createdAt: p.createdAt, coverThumb: p.coverThumb });
-  const full = p => { const u = me(); const studio = u.role !== 'user'; return Object.assign({}, p, { maxRevisions: 3, can: { decide: (p.requesterEmail === u.email || p.ownerEmail === u.email) && p.status === 'Do akceptacji', studio, claim: studio && !p.assigneeEmail, edit: studio && (p.assigneeEmail === u.email || u.role === 'admin') } }); };
+  const full = p => { const u = me(); const studio = u.role !== 'user'; return Object.assign({}, p, { maxRevisions: 3, can: { decide: (p.requesterEmail === u.email || p.ownerEmail === u.email) && p.status === 'Do akceptacji', studio, claim: studio && !p.assigneeEmail && p.status !== 'Odrzucone', reject: studio && p.status !== 'Odrzucone' && p.status !== 'Gotowe' && (!p.assigneeEmail || p.assigneeEmail === u.email || u.role === 'admin'), edit: studio && p.status !== 'Odrzucone' && (p.assigneeEmail === u.email || u.role === 'admin') } }); };
   const get = id => { const p = P.find(x => x.id === id); if (!p) throw new Error('Nie znaleziono zlecenia.'); return p; };
   const settings = () => ({ access: ACCESS, presets: PRESETS, holidays: HOLS });
   const API = {
@@ -51,14 +51,15 @@
       P.push(p); return { id, deadline: p.deadline };
     },
     listBoard: () => P.map(tile),
-    listMine: () => P.filter(p => p.requesterEmail === ME || p.ownerEmail === ME).map(tile),
+    listMine: () => P.filter(p => me().role !== 'user' ? p.assigneeEmail === ME : (p.requesterEmail === ME || p.ownerEmail === ME)).map(tile),
     getProject: id => full(get(id)),
     claimProject: id => { const p = get(id), u = me(); if (p.assigneeEmail && p.assigneeEmail !== u.email) throw new Error('Już przyjął: ' + p.assigneeName); Object.assign(p, { assigneeEmail: u.email, assigneeName: u.name, claimedAt: iso(), status: p.status === 'Nowe' ? 'W realizacji' : p.status }); p.history.push({ ts: iso(), actor: u.email, action: 'Przyjęte', details: u.name + ' bierze zadanie' }); return full(p); },
     releaseProject: id => { const p = get(id); Object.assign(p, { assigneeEmail: '', assigneeName: '', status: 'Nowe' }); p.history.push({ ts: iso(), actor: ME, action: 'Zwolnione', details: '' }); return full(p); },
     updateProject: (id, patch) => { const p = get(id); if (patch.status === 'Gotowe' && !(patch.deliveryLink || p.deliveryLink || p.finalFile)) throw new Error('Przed „Gotowe" wklej link do gotowego materiału.'); Object.assign(p, patch); p.history.push({ ts: iso(), actor: ME, action: 'Zmiana', details: JSON.stringify(patch) }); return full(p); },
-    addComment: (id, text) => { const p = get(id); p.comments.push({ ts: iso(), authorName: me().name, authorEmail: ME, text }); return full(p); },
+    addComment: (id, text) => { const p = get(id); p.comments.push({ ts: iso(), authorName: me().name, authorEmail: ME, text, studio: me().role !== 'user' }); return full(p); },
     startFinalUpload: (pid, name, mime, size) => { const p = get(pid); p._up = { name, mime, size }; return pid; },
     uploadFinalChunk: (id, offset, b64) => { const p = get(id); const n = offset + atob(b64).length; if (n < p._up.size) return { done: false, next: n }; p.finalFile = { id: 'demo', name: p._up.name, mime: p._up.mime, size: p._up.size, at: iso(), by: me().name }; p.history.push({ ts: iso(), actor: ME, action: 'Plik finalny', details: p._up.name }); return { done: true, project: full(p) }; },
+    rejectProject: (id, reason) => { const p = get(id); if (String(reason).trim().length < 10) throw new Error('Uzasadnij odrzucenie (min. 10 znaków).'); Object.assign(p, { status: 'Odrzucone', rejectReason: reason, rejectedAt: iso(), rejectedBy: me().name }); p.history.push({ ts: iso(), actor: ME, action: 'Odrzucone', details: reason }); return full(p); },
     acceptProject: id => { const p = get(id); if (p.status !== 'Do akceptacji') throw new Error('To zlecenie nie czeka teraz na akceptację.'); Object.assign(p, { status: 'Gotowe', acceptedAt: iso() }); p.history.push({ ts: iso(), actor: ME, action: 'Zaakceptowane', details: '' }); return full(p); },
     requestRevision: (id, text) => { const p = get(id); if (p.revisions.length >= 3) throw new Error('Wykorzystano już 3 z 3 tur poprawek.'); p.revisions.push({ n: p.revisions.length + 1, text, at: iso(), by: ME }); p.status = 'W realizacji'; p.history.push({ ts: iso(), actor: ME, action: 'Poprawki ' + p.revisions.length + '/3', details: text }); return full(p); },
     getFile: (pid, fid) => ({ name: 'plik.txt', mime: 'text/plain', b64: btoa('demo') }),

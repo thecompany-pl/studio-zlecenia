@@ -134,9 +134,12 @@ function listBoard() {
   return rows_('Projekty').map(tile_);
 }
 
+// Studio: zlecenia przyjęte do realizacji; pozostali: zgłoszone przez siebie albo jako owner.
 function listMine() {
   var u = me_();
+  var studio = isStudio_(u);
   return rows_('Projekty').filter(function (r) {
+    if (studio) return r.assigneeEmail === u.email;
     return r.requesterEmail === u.email || String(r.ownerEmail).toLowerCase() === u.email;
   }).map(tile_);
 }
@@ -152,6 +155,7 @@ function getProject(id, token) {
   var r = findProject_(id);
   if (!r || !canSee_(u, r, token)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
   var studio = isStudio_(u);
+  var staff = rows_('Dostep').filter(isStudio_).map(function (a) { return String(a.email).toLowerCase(); });
   var out = {
     id: r.id, createdAt: r.createdAt, updatedAt: r.updatedAt, status: r.status, title: r.title, description: r.description,
     requesterName: r.requesterName, requesterEmail: r.requesterEmail, ownerEmail: r.ownerEmail, brand: r.brand,
@@ -164,15 +168,17 @@ function getProject(id, token) {
     timecodes: json_(r.timecodes, []), coverFileId: r.coverFileId, coverThumb: r.coverThumb,
     finalFile: json_(r.finalFile, null),
     revisions: json_(r.revisions, []), maxRevisions: MAX_REVISIONS, acceptedAt: r.acceptedAt, acceptedBy: r.acceptedBy,
+    rejectReason: r.rejectReason, rejectedAt: r.rejectedAt, rejectedBy: r.rejectedBy,
     history: rows_('Historia').filter(function (h) { return h.projectId === id; })
       .map(function (h) { return { ts: h.ts, actor: h.actor, action: h.action, details: h.details }; }),
-    comments: studio ? rows_('Komentarze').filter(function (c) { return c.projectId === id; })
-      .map(function (c) { return { ts: c.ts, authorName: c.authorName, authorEmail: c.authorEmail, text: c.text }; }) : [],
+    comments: rows_('Komentarze').filter(function (c) { return c.projectId === id; })
+      .map(function (c) { return { ts: c.ts, authorName: c.authorName, authorEmail: c.authorEmail, text: c.text, studio: staff.indexOf(String(c.authorEmail).toLowerCase()) >= 0 }; }),
     can: {
       decide: canDecide_(u, r, token) && r.status === 'Do akceptacji',
       studio: studio,
-      claim: studio && !r.assigneeEmail,
-      edit: studio && (r.assigneeEmail === u.email || u.role === 'admin')
+      claim: studio && !r.assigneeEmail && r.status !== REJECTED,
+      reject: studio && r.status !== REJECTED && r.status !== 'Gotowe' && (!r.assigneeEmail || r.assigneeEmail === u.email || u.role === 'admin'),
+      edit: studio && r.status !== REJECTED && (r.assigneeEmail === u.email || u.role === 'admin')
     }
   };
   return out;
@@ -246,6 +252,7 @@ function withProjectLock_(id, fn) {
 function claimProject(id) {
   var u = requireStudio_();
   withProjectLock_(id, function (r) {
+    if (r.status === REJECTED) throw new Error('To zlecenie zostało odrzucone.');
     if (r.assigneeEmail && r.assigneeEmail !== u.email) throw new Error('Już przyjął: ' + r.assigneeName);
     if (r.assigneeEmail === u.email) return;
     var patch = { assigneeEmail: u.email, assigneeName: u.name, claimedAt: nowIso_(), updatedAt: nowIso_() };
@@ -255,6 +262,25 @@ function claimProject(id) {
     for (var k in patch) r[k] = patch[k];
     sendClaimedMail_(r);
   });
+  return getProject(id);
+}
+
+// Odrzucenie: tylko z uzasadnieniem, które trafia mailem do zgłaszającego (owner w kopii).
+function rejectProject(id, reason) {
+  var u = requireStudio_();
+  reason = String(reason || '').trim().slice(0, 4000);
+  if (reason.length < 10) throw new Error('Uzasadnij odrzucenie (min. 10 znaków).');
+  var row;
+  withProjectLock_(id, function (r) {
+    if (r.status === REJECTED) throw new Error('To zlecenie jest już odrzucone.');
+    if (r.status === 'Gotowe') throw new Error('Nie można odrzucić zamkniętego zlecenia.');
+    if (r.assigneeEmail && r.assigneeEmail !== u.email && u.role !== 'admin') throw new Error('Odrzucić może osoba przypisana albo admin.');
+    var patch = { status: REJECTED, rejectReason: reason, rejectedAt: nowIso_(), rejectedBy: u.name, updatedAt: nowIso_() };
+    update_('Projekty', r._row, patch);
+    log_(id, u.email, 'Odrzucone', reason);
+    row = Object.assign({}, r, patch);
+  });
+  sendRejectedMail_(row, u);
   return getProject(id);
 }
 
@@ -297,13 +323,16 @@ function updateProject(id, patch) {
   return getProject(id);
 }
 
-function addComment(id, text) {
-  var u = requireStudio_();
+// Dyskusja pod zleceniem: studio + zgłaszający/owner (także z linkiem z maila). Druga strona dostaje maila.
+function addComment(id, text, token) {
+  var u = me_();
   text = String(text || '').trim().slice(0, 4000);
   if (!text) throw new Error('Pusty komentarz.');
-  if (!findProject_(id)) throw new Error('Nie znaleziono zlecenia.');
+  var r = findProject_(id);
+  if (!r || !canSee_(u, r, token)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
   append_('Komentarze', { ts: nowIso_(), projectId: id, authorEmail: u.email, authorName: u.name, text: text });
-  return getProject(id);
+  sendCommentMail_(r, text, u, isStudio_(u));
+  return getProject(id, token);
 }
 
 // --- plik finalny: upload wznawialny prosto do Drive (kawałki po 4 MB, bez sklejania w pamięci) ---
