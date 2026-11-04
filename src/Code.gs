@@ -4,6 +4,7 @@ var APP_NAME = 'Zlecenia Studio'; // nazwa nadawcy w mailach
 var TZ = 'Europe/Warsaw';
 var ALLOWED_DOMAINS = ['tc.pl', 'bnipolska.pl', 'cc.pl'];
 var STATUSES = ['Nowe', 'W realizacji', 'Do akceptacji', 'Gotowe'];
+var REJECTED = 'Odrzucone';  // tylko przez „Odrzuć zlecenie” (wymaga uzasadnienia), nie ma go w przełączniku statusów
 var BRANDS = ['The Company', 'CC', 'BNI', 'BNI+', 'CC+', 'Fundacja', 'Think Tank'];
 var CATEGORIES = ['rolka', 'trailer', 'showreel', 'avatar', 'inne'];
 var FORMATS = ['4:5 1080×1350', 'Kwadrat 1080×1080', 'Pionowy 1080×1920', 'Poziomy 1920×1080'];
@@ -48,7 +49,7 @@ var PUBLIC_URL = 'https://zlecenia-studio.tc.pl/';
 function appUrl_() { return PUBLIC_URL; }
 
 // Uruchamia się samo przy pierwszym wejściu właściciela; można też odpalić ręcznie z edytora.
-var SCHEMA_VERSION = '2';
+var SCHEMA_VERSION = '3';
 var MAX_REVISIONS = 3;
 
 function ensureSetup_() {

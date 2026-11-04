@@ -67,8 +67,10 @@ function nowWaw() {
     .formatToParts(new Date()).map(x => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) + Number(p.minute) / 60 };
 }
+const closed = t => t.status === 'Gotowe' || t.status === 'Odrzucone';
 function dueInfo(t) {
   if (t.status === 'Gotowe') return { cls: 'fin', txt: 'gotowe' };
+  if (t.status === 'Odrzucone') return { cls: 'rej', txt: 'odrzucone' };
   const iso = t.confirmedDeadline || t.deadline;
   if (!iso) return { cls: '', txt: '—' };
   const ymd = iso.slice(0, 10), n = nowWaw(), hour = Number(iso.slice(11, 13)) || 17;
@@ -583,7 +585,7 @@ async function viewBoard() {
   const app = $('#app');
   app.innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Studio</div><h1 class="h1">Tablica zleceń</h1></div><div class="stats" id="stats"></div></div><div id="filters"></div><div id="tiles">${skeleton()}</div></section>`;
   try { BOARD = await api('listBoard'); } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
-  B.freeCount = BOARD.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop();
+  B.freeCount = BOARD.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop();
   drawBoard();
 }
 
@@ -594,7 +596,7 @@ function drawBoard() {
   $('#stats').innerHTML = [['Nowe', cnt('Nowe')], ['W realizacji', cnt('W realizacji')], ['Do akceptacji', cnt('Do akceptacji')], ['Wolne', B.freeCount]]
     .map(([k, v]) => `<div class="stat"><div class="sv">${v}</div><div class="sk">${k}</div></div>`).join('');
   $('#filters').innerHTML = `<div class="filters">
-    ${fc('status', 'aktywne', 'Aktywne')}${B.statuses.map(s => fc('status', s)).join('')}${fc('status', '', 'Wszystkie')}
+    ${fc('status', 'aktywne', 'Aktywne')}${B.statuses.concat('Odrzucone').map(s => fc('status', s)).join('')}${fc('status', '', 'Wszystkie')}
     <span class="sep"></span>${fc('who', 'moje', 'Moje')}${fc('who', 'wolne', 'Wolne')}
     <span class="sep"></span>
     <select class="sel" data-fsel="brand"><option value="">Każdy brand</option>${B.brands.map(b => `<option ${F.brand === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>
@@ -612,7 +614,7 @@ function drawTiles() {
   const PR = { krytyczny: 0, wysoki: 1, 'średni': 2, niski: 3 };
   const q = F.q.trim().toLowerCase();
   let list = BOARD.filter(t =>
-    (F.status === 'aktywne' ? t.status !== 'Gotowe' : !F.status || t.status === F.status) &&
+    (F.status === 'aktywne' ? !closed(t) : !F.status || t.status === F.status) &&
     (!F.brand || t.brand === F.brand) && (!F.category || t.category === F.category) &&
     (F.who !== 'moje' || t.assigneeEmail === B.user.email) && (F.who !== 'wolne' || !t.assigneeEmail) &&
     (!q || (t.title + ' ' + t.id).toLowerCase().includes(q)));
@@ -665,7 +667,7 @@ function drawProject(p) {
     </div></div>
     <div class="pgrid">
       <div>
-        ${acceptedBanner(p)}
+        ${acceptedBanner(p)}${rejectedBanner(p)}
         ${finalCard(p)}
         ${decisionCard(p)}
         ${revisionsCard(p)}
@@ -692,6 +694,11 @@ function drawProject(p) {
             : p.can.claim ? `<button class="btn btn-p btn-lg claim" id="claim">Biorę to</button><div class="hint" style="text-align:center">Zadanie przypisze się do ${esc(B.user.email)}</div>`
             : '<p class="muted" style="margin:0">Czeka na osobę ze studia.</p>'}
           ${p.can.edit ? `<button class="btn-t btn" id="release" style="margin-top:10px;font-size:13px">Zwolnij zadanie</button>` : ''}
+          ${p.can.reject ? `<button class="btn-t btn rej-open" id="rejOpen">Odrzuć zlecenie</button>
+            <div id="rejBox" hidden><label class="lbl" style="margin-top:14px">Powód odrzucenia</label>
+            <textarea class="in" id="rejIn" style="min-height:90px" placeholder="Np. brak materiałów, termin niemożliwy do realizacji, zlecenie poza zakresem studia…"></textarea>
+            <div class="hint">Uzasadnienie jest wymagane i trafi mailem do zgłaszającego.</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g btn-sm" id="rejCancel">Anuluj</button><button class="btn btn-sm btn-rej" id="rejSend">Odrzuć i wyślij</button></div></div>` : ''}
         </div>
         <div class="card">
           <div class="card-t">Termin</div>
@@ -712,6 +719,13 @@ function drawProject(p) {
     catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.innerHTML = old; if (/Już przyjął/.test(e.message)) viewProject(p.id); }
   };
   $('#claim') && ($('#claim').onclick = e => act(e.currentTarget, () => api('claimProject', p.id).then(np => { B.freeCount = Math.max(0, (B.freeCount || 0) - 1); renderTop(); return np; }), 'Zadanie jest Twoje. Zgłaszający dostał maila.'));
+  $('#rejOpen') && ($('#rejOpen').onclick = () => { $('#rejBox').hidden = false; $('#rejOpen').hidden = true; $('#rejIn').focus(); });
+  $('#rejCancel') && ($('#rejCancel').onclick = () => { $('#rejBox').hidden = true; $('#rejOpen').hidden = false; });
+  $('#rejSend') && ($('#rejSend').onclick = e => {
+    const t = $('#rejIn').value.trim();
+    if (t.length < 10) return toast('Uzasadnij odrzucenie (min. 10 znaków).', 'bad');
+    act(e.currentTarget, () => api('rejectProject', p.id, t), 'Zlecenie odrzucone, zgłaszający dostał maila.');
+  });
   $('#release') && ($('#release').onclick = e => { if (confirm('Oddać to zadanie? Wróci jako wolne na tablicę.')) act(e.currentTarget, () => api('releaseProject', p.id), 'Zadanie zwolnione.'); });
   $$('[data-st]').forEach(b => b.onclick = () => act(b, () => api('updateProject', p.id, { status: b.dataset.st, deliveryLink: $('#dlIn').value.trim() }), 'Status: ' + b.dataset.st));
   $('#dlSave') && ($('#dlSave').onclick = e => act(e.currentTarget, () => api('updateProject', p.id, { deliveryLink: $('#dlIn').value.trim() }), 'Link zapisany.'));
@@ -741,6 +755,11 @@ function drawProject(p) {
 function acceptedBanner(p) {
   if (!p.acceptedAt) return '';
   return `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div><div class="w5">Zaakceptowane ${fmtTs(p.acceptedAt)}</div><div class="muted" style="font-size:13px">Zlecenie zamknięte. Materiał zostaje tu do pobrania.</div></div></div>`;
+}
+
+function rejectedBanner(p) {
+  if (p.status !== 'Odrzucone') return '';
+  return `<div class="card sec rej-banner"><span class="rej-dot">${ICON.x || '✕'}</span><div><div class="w5">Zlecenie odrzucone ${fmtTs(p.rejectedAt)}${p.rejectedBy ? ' · ' + esc(p.rejectedBy) : ''}</div><div class="rej-why">${esc(p.rejectReason)}</div></div></div>`;
 }
 
 function decisionCard(p) {
@@ -881,6 +900,6 @@ async function refreshHol() { try { const b = await api('getBootstrap'); HOL = b
     if (p && loc.parameter.t) { TOK[p] = loc.parameter.t; saveTok(); }
     render(loc.hash || (p ? '/projekt/' + p : ''));
   });
-  if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop(); }).catch(() => {});
+  if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop(); }).catch(() => {});
 })();
 </script>

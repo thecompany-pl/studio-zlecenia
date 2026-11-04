@@ -128,6 +128,13 @@ function sendCommentMail_(r, text, u, fromStudio) {
   }
 }
 
+function sendRejectedMail_(r, u) {
+  send_(r.id, [r.requesterEmail], [r.ownerEmail], 'Odrzucone: ' + r.title,
+    mailHtml_('Zlecenie odrzucone', '<b>' + esc_(u.name) + '</b> ze studia odrzucił(a) zlecenie „' + esc_(r.title) + '". Powód:<br><br><div style="padding:12px 14px;border-radius:10px;background:#f6f6f8;color:#16161a;white-space:pre-wrap">' + esc_(r.rejectReason) + '</div>',
+      [['Zlecenie', r.id]], ['Otwórz zlecenie', guestLink_(r)],
+      'Masz pytania? Odpowiedz na tego maila albo napisz komentarz pod zleceniem.'), u.email);
+}
+
 function sendAcceptedMail_(r, u) {
   if (!r.assigneeEmail) return;
   send_(r.id, [r.assigneeEmail], [], 'Zaakceptowane: ' + r.title,

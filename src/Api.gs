@@ -168,6 +168,7 @@ function getProject(id, token) {
     timecodes: json_(r.timecodes, []), coverFileId: r.coverFileId, coverThumb: r.coverThumb,
     finalFile: json_(r.finalFile, null),
     revisions: json_(r.revisions, []), maxRevisions: MAX_REVISIONS, acceptedAt: r.acceptedAt, acceptedBy: r.acceptedBy,
+    rejectReason: r.rejectReason, rejectedAt: r.rejectedAt, rejectedBy: r.rejectedBy,
     history: rows_('Historia').filter(function (h) { return h.projectId === id; })
       .map(function (h) { return { ts: h.ts, actor: h.actor, action: h.action, details: h.details }; }),
     comments: rows_('Komentarze').filter(function (c) { return c.projectId === id; })
@@ -175,8 +176,9 @@ function getProject(id, token) {
     can: {
       decide: canDecide_(u, r, token) && r.status === 'Do akceptacji',
       studio: studio,
-      claim: studio && !r.assigneeEmail,
-      edit: studio && (r.assigneeEmail === u.email || u.role === 'admin')
+      claim: studio && !r.assigneeEmail && r.status !== REJECTED,
+      reject: studio && r.status !== REJECTED && r.status !== 'Gotowe' && (!r.assigneeEmail || r.assigneeEmail === u.email || u.role === 'admin'),
+      edit: studio && r.status !== REJECTED && (r.assigneeEmail === u.email || u.role === 'admin')
     }
   };
   return out;
@@ -250,6 +252,7 @@ function withProjectLock_(id, fn) {
 function claimProject(id) {
   var u = requireStudio_();
   withProjectLock_(id, function (r) {
+    if (r.status === REJECTED) throw new Error('To zlecenie zostało odrzucone.');
     if (r.assigneeEmail && r.assigneeEmail !== u.email) throw new Error('Już przyjął: ' + r.assigneeName);
     if (r.assigneeEmail === u.email) return;
     var patch = { assigneeEmail: u.email, assigneeName: u.name, claimedAt: nowIso_(), updatedAt: nowIso_() };
@@ -259,6 +262,25 @@ function claimProject(id) {
     for (var k in patch) r[k] = patch[k];
     sendClaimedMail_(r);
   });
+  return getProject(id);
+}
+
+// Odrzucenie: tylko z uzasadnieniem, które trafia mailem do zgłaszającego (owner w kopii).
+function rejectProject(id, reason) {
+  var u = requireStudio_();
+  reason = String(reason || '').trim().slice(0, 4000);
+  if (reason.length < 10) throw new Error('Uzasadnij odrzucenie (min. 10 znaków).');
+  var row;
+  withProjectLock_(id, function (r) {
+    if (r.status === REJECTED) throw new Error('To zlecenie jest już odrzucone.');
+    if (r.status === 'Gotowe') throw new Error('Nie można odrzucić zamkniętego zlecenia.');
+    if (r.assigneeEmail && r.assigneeEmail !== u.email && u.role !== 'admin') throw new Error('Odrzucić może osoba przypisana albo admin.');
+    var patch = { status: REJECTED, rejectReason: reason, rejectedAt: nowIso_(), rejectedBy: u.name, updatedAt: nowIso_() };
+    update_('Projekty', r._row, patch);
+    log_(id, u.email, 'Odrzucone', reason);
+    row = Object.assign({}, r, patch);
+  });
+  sendRejectedMail_(row, u);
   return getProject(id);
 }
 
