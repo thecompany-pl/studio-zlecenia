@@ -476,7 +476,46 @@ function makeThumb(file) {
   });
 }
 
+// Upload bezpośredni do Drive: kawałki po 32 MB (wielokrotność 256 KB), postęp z XHR. 308 = kawałek przyjęty, 200/201 = koniec.
+const DIRECT_CHUNK = 32 * 1024 * 1024;
+let DIRECT_OK = true; // po pierwszej porażce (np. blokada CORS) przechodzimy na zapasowy upload przez serwer
+function putRange(url, blob, start, total, onProgress) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', url);
+    x.setRequestHeader('Content-Range', 'bytes ' + start + '-' + (start + blob.size - 1) + '/' + total);
+    x.upload.onprogress = e => onProgress && onProgress(start + e.loaded);
+    x.onload = () => {
+      if (x.status === 308) return res(null);
+      if (x.status === 200 || x.status === 201) { try { return res(JSON.parse(x.responseText)); } catch (e) { return rej(new Error('Drive zwrócił niezrozumiałą odpowiedź.')); } }
+      rej(new Error('Błąd wysyłania do Drive (' + x.status + ').'));
+    };
+    x.onerror = () => rej(new Error('direct-network'));
+    x.send(blob);
+  });
+}
+async function putDirect(url, file, onProgress) {
+  let done = null;
+  for (let off = 0; off < file.size; off += DIRECT_CHUNK) {
+    done = await putRange(url, file.slice(off, off + DIRECT_CHUNK), off, file.size, onProgress);
+  }
+  if (!done || !done.id) throw new Error('Drive nie potwierdził zapisu pliku.');
+  return done.id;
+}
+
 async function uploadOne(f, file, kind) {
+  if (DIRECT_OK) {
+    try {
+      const s = await api('startDirectUpload', kind, file.name, file.type || 'application/octet-stream', file.size, location.origin);
+      const fileId = await putDirect(s.url, file, sent => { f.p = Math.min(.97, sent / file.size); updateBars(); });
+      f.meta = await api('finishDirectUpload', s.uploadId, fileId);
+      f.status = 'ok'; f.p = 1; f.at = Date.now();
+      saveDraft(); updateBars(); return;
+    } catch (err) {
+      if (err.message !== 'direct-network') { f.status = 'err'; f.err = err.message; saveDraft(); updateBars(); return; }
+      DIRECT_OK = false;
+    }
+  }
   try {
     const b64 = await readB64(file);
     const id = rid(), total = Math.max(1, Math.ceil(b64.length / CHUNK));
@@ -819,9 +858,28 @@ async function uploadFinal(p, file) {
   FUP = { projectId: p.id, name: file.name, size: file.size, sent: 0 };
   drawProject(p);
   window.addEventListener('beforeunload', warnLeave);
+  const showSent = sent => { FUP.sent = sent; if ($('#fupBar')) { $('#fupBar').style.width = Math.round(sent / file.size * 100) + '%'; $('#fupTxt').textContent = fmtSize(sent) + ' / ' + fmtSize(file.size); } };
+  let res = null;
+  if (DIRECT_OK) {
+    try {
+      const s = await api('startFinalDirect', p.id, file.name, file.type || 'application/octet-stream', file.size, location.origin);
+      const fileId = await putDirect(s.url, file, showSent);
+      res = await api('finishFinalDirect', s.uploadId, fileId);
+    } catch (e) {
+      if (e.message !== 'direct-network') { FUP = null; toast(e.message, 'bad'); drawProject(p); window.removeEventListener('beforeunload', warnLeave); return; }
+      DIRECT_OK = false; showSent(0);
+    }
+  }
+  if (res) {
+    FUP = null;
+    toast('Plik finalny wrzucony.', 'ok');
+    if (route === '/projekt/' + p.id || route === '/projekt/' + encodeURIComponent(p.id)) drawProject(res.project);
+    window.removeEventListener('beforeunload', warnLeave);
+    return;
+  }
   try {
     const id = await api('startFinalUpload', p.id, file.name, file.type || 'application/octet-stream', file.size);
-    let offset = 0, res = null;
+    let offset = 0;
     while (offset < file.size) {
       const b64 = await readB64(file.slice(offset, offset + FINAL_CHUNK));
       res = await api('uploadFinalChunk', id, offset, b64);
