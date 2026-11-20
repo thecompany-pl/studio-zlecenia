@@ -4,11 +4,13 @@ var SHEETS = {
   Projekty: ['id', 'createdAt', 'updatedAt', 'status', 'title', 'description', 'requesterName', 'requesterEmail', 'ownerEmail',
     'brand', 'category', 'formats', 'platforms', 'priority', 'materialsLink', 'publishDate', 'presetKey', 'workDays',
     'deadline', 'confirmedDeadline', 'assigneeEmail', 'assigneeName', 'claimedAt', 'deliveryLink', 'folderId',
-    'scriptFiles', 'timecodesFile', 'timecodes', 'coverFileId', 'coverThumb', 'viewToken', 'finalFile', 'revisions', 'acceptedAt', 'acceptedBy'],
+    'scriptFiles', 'timecodesFile', 'timecodes', 'coverFileId', 'coverThumb', 'viewToken', 'finalFile', 'revisions', 'acceptedAt', 'acceptedBy', 'rejectReason', 'rejectedAt', 'rejectedBy'],
   Historia: ['ts', 'projectId', 'actor', 'action', 'details'],
   Komentarze: ['ts', 'projectId', 'authorEmail', 'authorName', 'text'],
   Dostep: ['email', 'name', 'role', 'addedBy', 'addedAt'],
-  Swieta: ['date', 'name']
+  Swieta: ['date', 'name'],
+  Rezerwacje: ['id', 'createdAt', 'updatedAt', 'status', 'title', 'description', 'requesterName', 'requesterEmail', 'brand',
+    'guests', 'format', 'date', 'start', 'end', 'notes', 'eventId', 'decidedBy', 'decidedAt', 'decisionNote']
 };
 
 var ss__ = null;
