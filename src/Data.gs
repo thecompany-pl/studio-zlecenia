@@ -8,7 +8,9 @@ var SHEETS = {
   Historia: ['ts', 'projectId', 'actor', 'action', 'details'],
   Komentarze: ['ts', 'projectId', 'authorEmail', 'authorName', 'text'],
   Dostep: ['email', 'name', 'role', 'addedBy', 'addedAt'],
-  Swieta: ['date', 'name']
+  Swieta: ['date', 'name'],
+  Rezerwacje: ['id', 'createdAt', 'updatedAt', 'status', 'title', 'description', 'requesterName', 'requesterEmail', 'brand',
+    'guests', 'format', 'date', 'start', 'end', 'notes', 'eventId', 'decidedBy', 'decidedAt', 'decisionNote']
 };
 
 var ss__ = null;

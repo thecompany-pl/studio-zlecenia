@@ -97,10 +97,10 @@ const nav = {
 };
 
 function renderTop() {
-  const items = [['/nowe', 'Nowe zlecenie'], ['/moje', 'Moje zlecenia']];
+  const items = [['/nowe', 'Nowe zlecenie'], ['/moje', 'Moje zlecenia'], ['/studio', 'Studio nagrań']];
   if (isStudio()) items.push(['/tablica', 'Tablica studia']);
   if (B.user.role === 'admin') items.push(['/ustawienia', 'Ustawienia']);
-  $('#nav').innerHTML = items.map(([h, l]) => `<button data-go="${h}" class="${route.startsWith(h) || (h === '/tablica' && route.startsWith('/projekt')) && isStudio() ? 'on' : ''}">${l}${h === '/tablica' && B.freeCount ? `<span class="count">${B.freeCount}</span>` : ''}</button>`).join('');
+  $('#nav').innerHTML = items.map(([h, l]) => `<button data-go="${h}" class="${route.startsWith(h) || (h === '/tablica' && route.startsWith('/projekt')) && isStudio() || (h === '/studio' && route.startsWith('/rezerwacja')) ? 'on' : ''}">${l}${h === '/tablica' && B.freeCount ? `<span class="count">${B.freeCount}</span>` : ''}</button>`).join('');
   $('#me').innerHTML = `<span class="nm">${esc(B.user.name)}</span><span class="av" title="${esc(B.user.email)}">${initials(B.user.name)}</span>`;
 }
 
@@ -113,6 +113,9 @@ function render(h) {
   if (m) return viewProject(decodeURIComponent(m[1]));
   if (route === '/tablica' && isStudio()) return viewBoard();
   if (route === '/moje') return viewMine();
+  if (route === '/studio') return viewStudio();
+  const rz = route.match(/^\/rezerwacja\/(.+)$/);
+  if (rz) return viewBooking(decodeURIComponent(rz[1]));
   if (route === '/ustawienia' && B.user.role === 'admin') return viewSettings();
   if (route === '/gotowe') return; // ekran sukcesu rysuje kreator
   route = '/nowe'; renderTop();
@@ -920,6 +923,9 @@ function drawSettings(s) {
         <div id="pre">${s.presets.map(p => preRow(p)).join('')}</div>
         <div style="display:flex;justify-content:space-between;margin-top:10px"><button class="btn-t btn" id="preAdd">+ dodaj preset</button><button class="btn btn-g btn-sm" id="preSave">Zapisz presety</button></div>
         <div class="hint">Nazwa · etykieta · dni robocze · „do godz." (np. 12 przy avatarze: zgłoszone przed 12:00 → gotowe tego samego dnia).</div></div>
+      <div class="card" style="margin-bottom:20px"><div class="card-t">Zarządzający studiem <span class="dim">· zgody na rezerwacje po godzinach</span></div>
+        <div style="display:flex;gap:8px"><input class="in" id="mgrIn" value="${esc(s.studioManager || '')}" placeholder="imie.nazwisko@tc.pl" style="padding:9px 12px"><button class="btn btn-g btn-sm" id="mgrSave" style="height:42px">Zapisz</button></div>
+        <div class="hint">Dostaje maile z prośbą o zgodę na rezerwacje studia poza godzinami ${B.bkWork[0]}:00–${B.bkWork[1]}:00 i zatwierdza je w portalu. Puste = zgody dają admini.</div></div>
       <div class="card"><div class="card-t">Dni wolne</div>
         ${upcoming.map(h => `<div class="hol"><span>${esc(h.date.split('-').reverse().join('.'))} · <span class="muted">${esc(h.name)}</span></span><button class="x" data-rmhol="${esc(h.date)}">${ICON.x}</button></div>`).join('')}
         <div style="display:flex;gap:8px;margin-top:12px"><input class="in" type="date" id="hDate" style="padding:8px 10px"><input class="in" id="hName" placeholder="np. wyjazd firmowy" style="padding:8px 10px"><button class="btn btn-g btn-sm" id="hAdd" style="height:40px">Dodaj</button></div>
@@ -934,6 +940,7 @@ function drawSettings(s) {
     const list = $$('#pre .pre-row').map(r => ({ key: r.dataset.key, label: $('[data-p=label]', r).value.trim(), hint: $('[data-p=hint]', r).value.trim(), days: Number($('[data-p=days]', r).value), cutoff: Number($('[data-p=cutoff]', r).value) || 0 })).filter(p => p.label);
     run(() => api('savePresets', list), 'Presety zapisane.').then(() => { B.presets = list; });
   };
+  $('#mgrSave').onclick = () => run(() => api('saveStudioManager', $('#mgrIn').value), 'Zapisano zarządzającego studiem.');
   $('#hAdd').onclick = () => run(() => api('addHoliday', $('#hDate').value, $('#hName').value), 'Dodano dzień wolny.').then(refreshHol);
   $$('[data-rmhol]').forEach(b => b.onclick = () => run(() => api('removeHoliday', b.dataset.rmhol)).then(refreshHol));
 }
@@ -957,7 +964,8 @@ async function refreshHol() { try { const b = await api('getBootstrap'); HOL = b
   google.script.url.getLocation(loc => {
     const p = loc.parameter && loc.parameter.p;
     if (p && loc.parameter.t) { TOK[p] = loc.parameter.t; saveTok(); }
-    render(loc.hash || (p ? '/projekt/' + p : ''));
+    const rz = loc.parameter && loc.parameter.r;
+    render(loc.hash || (p ? '/projekt/' + p : rz ? '/rezerwacja/' + rz : ''));
   });
   if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop(); }).catch(() => {});
 })();

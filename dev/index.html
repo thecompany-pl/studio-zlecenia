@@ -296,7 +296,50 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .boot{min-height:70vh;display:grid;place-items:center;color:var(--mut)}
 .boot .spin{width:26px;height:26px;margin:0 auto 14px}
 
+/* rezerwacje studia */
+.bk-grid{grid-template-columns:minmax(0,1fr) 390px}
+.tl-bar{position:relative;height:46px;border-radius:12px;background:#ececf0;overflow:hidden;cursor:pointer}
+.tl-bar i{position:absolute;top:0;bottom:0}
+.tl-work{background:#fff;border-left:1px solid var(--line2);border-right:1px solid var(--line2)}
+.tl-busy{background:#3a3a44;opacity:.78}
+.tl-busy.tent{background:repeating-linear-gradient(45deg,#8a8a94 0 6px,#b5b5bd 6px 12px);opacity:.9}
+.tl-sel{top:7px!important;bottom:7px!important;border-radius:8px;background:rgba(15,157,107,.85);box-shadow:0 0 0 2px #fff}
+.tl-sel.wait{background:rgba(178,106,0,.85)}
+.tl-sel.bad{background:rgba(217,45,58,.85)}
+.tl-ticks{position:relative;height:18px;margin-top:4px;font-size:11px;color:var(--mut)}
+.tl-ticks span{position:absolute;transform:translateX(-50%)}
+.tl-ticks span:first-child{transform:none}
+.tl-ticks span:last-child{transform:translateX(-100%)}
+.tl-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--mut);margin-top:6px}
+.tl-legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.lg-work{background:#fff;border:1px solid var(--line2)}
+.lg-busy{background:#3a3a44}
+.lg-sel{background:rgba(15,157,107,.85)}
+.bk-t{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--mut);flex:1}
+.bk-t .sel{height:42px;width:100%;font-size:14.5px}
+.bk-state{margin-top:14px;padding:11px 13px;border-radius:12px;font-size:13.5px;background:var(--card2);border:1px solid var(--line)}
+.bk-state.ok{background:rgba(15,157,107,.07);border-color:rgba(15,157,107,.3);color:#0b6e4b}
+.bk-state.wait{background:rgba(178,106,0,.07);border-color:rgba(178,106,0,.3);color:#7d4b00}
+.bk-state.bad{background:rgba(217,45,58,.06);border-color:rgba(217,45,58,.3);color:#9f1d28}
+.bk-busy{display:flex;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.bk-busy:last-child{border-bottom:0}
+.bk-busy .mono,.mono{font-family:'Roboto Mono',ui-monospace,Menlo,monospace;font-size:12.5px}
+.bk-row{display:flex;align-items:center;gap:16px;width:100%;text-align:left;padding:12px 4px;border-bottom:1px solid var(--line);transition:.15s}
+.bk-row:last-child{border-bottom:0}
+.bk-row:hover{background:var(--card2)}
+.bk-d{display:flex;flex-direction:column;min-width:86px;font-size:12.5px;color:var(--mut)}
+.bk-d b{font-size:16px;color:var(--tx)}
+.bk-m{flex:1;min-width:0;display:flex;flex-direction:column;font-size:12.5px}
+.bk-m .nm{font-size:14.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-pill{font-size:12px;padding:4px 10px;border-radius:999px;white-space:nowrap;border:1px solid var(--line2);color:var(--mut)}
+.bk-pill.ok{color:#0b6e4b;border-color:rgba(15,157,107,.35);background:rgba(15,157,107,.07)}
+.bk-pill.wait{color:#7d4b00;border-color:rgba(178,106,0,.35);background:rgba(178,106,0,.08)}
+.bk-head{margin:6px 0 22px}
+.bk-when{font-size:15px;font-weight:500}
+.bk-wait{border-color:rgba(178,106,0,.35);background:rgba(178,106,0,.05)}
+
 @media (max-width:900px){
+  .bk-grid{grid-template-columns:1fr}
   .pgrid,.set-grid,.summary{grid-template-columns:1fr}
   .side{position:static}
 }
@@ -516,10 +559,10 @@ const nav = {
 };
 
 function renderTop() {
-  const items = [['/nowe', 'Nowe zlecenie'], ['/moje', 'Moje zlecenia']];
+  const items = [['/nowe', 'Nowe zlecenie'], ['/moje', 'Moje zlecenia'], ['/studio', 'Studio nagrań']];
   if (isStudio()) items.push(['/tablica', 'Tablica studia']);
   if (B.user.role === 'admin') items.push(['/ustawienia', 'Ustawienia']);
-  $('#nav').innerHTML = items.map(([h, l]) => `<button data-go="${h}" class="${route.startsWith(h) || (h === '/tablica' && route.startsWith('/projekt')) && isStudio() ? 'on' : ''}">${l}${h === '/tablica' && B.freeCount ? `<span class="count">${B.freeCount}</span>` : ''}</button>`).join('');
+  $('#nav').innerHTML = items.map(([h, l]) => `<button data-go="${h}" class="${route.startsWith(h) || (h === '/tablica' && route.startsWith('/projekt')) && isStudio() || (h === '/studio' && route.startsWith('/rezerwacja')) ? 'on' : ''}">${l}${h === '/tablica' && B.freeCount ? `<span class="count">${B.freeCount}</span>` : ''}</button>`).join('');
   $('#me').innerHTML = `<span class="nm">${esc(B.user.name)}</span><span class="av" title="${esc(B.user.email)}">${initials(B.user.name)}</span>`;
 }
 
@@ -532,6 +575,9 @@ function render(h) {
   if (m) return viewProject(decodeURIComponent(m[1]));
   if (route === '/tablica' && isStudio()) return viewBoard();
   if (route === '/moje') return viewMine();
+  if (route === '/studio') return viewStudio();
+  const rz = route.match(/^\/rezerwacja\/(.+)$/);
+  if (rz) return viewBooking(decodeURIComponent(rz[1]));
   if (route === '/ustawienia' && B.user.role === 'admin') return viewSettings();
   if (route === '/gotowe') return; // ekran sukcesu rysuje kreator
   route = '/nowe'; renderTop();
@@ -1339,6 +1385,9 @@ function drawSettings(s) {
         <div id="pre">${s.presets.map(p => preRow(p)).join('')}</div>
         <div style="display:flex;justify-content:space-between;margin-top:10px"><button class="btn-t btn" id="preAdd">+ dodaj preset</button><button class="btn btn-g btn-sm" id="preSave">Zapisz presety</button></div>
         <div class="hint">Nazwa · etykieta · dni robocze · „do godz." (np. 12 przy avatarze: zgłoszone przed 12:00 → gotowe tego samego dnia).</div></div>
+      <div class="card" style="margin-bottom:20px"><div class="card-t">Zarządzający studiem <span class="dim">· zgody na rezerwacje po godzinach</span></div>
+        <div style="display:flex;gap:8px"><input class="in" id="mgrIn" value="${esc(s.studioManager || '')}" placeholder="imie.nazwisko@tc.pl" style="padding:9px 12px"><button class="btn btn-g btn-sm" id="mgrSave" style="height:42px">Zapisz</button></div>
+        <div class="hint">Dostaje maile z prośbą o zgodę na rezerwacje studia poza godzinami ${B.bkWork[0]}:00–${B.bkWork[1]}:00 i zatwierdza je w portalu. Puste = zgody dają admini.</div></div>
       <div class="card"><div class="card-t">Dni wolne</div>
         ${upcoming.map(h => `<div class="hol"><span>${esc(h.date.split('-').reverse().join('.'))} · <span class="muted">${esc(h.name)}</span></span><button class="x" data-rmhol="${esc(h.date)}">${ICON.x}</button></div>`).join('')}
         <div style="display:flex;gap:8px;margin-top:12px"><input class="in" type="date" id="hDate" style="padding:8px 10px"><input class="in" id="hName" placeholder="np. wyjazd firmowy" style="padding:8px 10px"><button class="btn btn-g btn-sm" id="hAdd" style="height:40px">Dodaj</button></div>
@@ -1353,6 +1402,7 @@ function drawSettings(s) {
     const list = $$('#pre .pre-row').map(r => ({ key: r.dataset.key, label: $('[data-p=label]', r).value.trim(), hint: $('[data-p=hint]', r).value.trim(), days: Number($('[data-p=days]', r).value), cutoff: Number($('[data-p=cutoff]', r).value) || 0 })).filter(p => p.label);
     run(() => api('savePresets', list), 'Presety zapisane.').then(() => { B.presets = list; });
   };
+  $('#mgrSave').onclick = () => run(() => api('saveStudioManager', $('#mgrIn').value), 'Zapisano zarządzającego studiem.');
   $('#hAdd').onclick = () => run(() => api('addHoliday', $('#hDate').value, $('#hName').value), 'Dodano dzień wolny.').then(refreshHol);
   $$('[data-rmhol]').forEach(b => b.onclick = () => run(() => api('removeHoliday', b.dataset.rmhol)).then(refreshHol));
 }
@@ -1376,10 +1426,232 @@ async function refreshHol() { try { const b = await api('getBootstrap'); HOL = b
   google.script.url.getLocation(loc => {
     const p = loc.parameter && loc.parameter.p;
     if (p && loc.parameter.t) { TOK[p] = loc.parameter.t; saveTok(); }
-    render(loc.hash || (p ? '/projekt/' + p : ''));
+    const rz = loc.parameter && loc.parameter.r;
+    render(loc.hash || (p ? '/projekt/' + p : rz ? '/rezerwacja/' + rz : ''));
   });
   if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop(); }).catch(() => {});
 })();
+</script>
+
+  <script>
+// ================= STUDIO NAGRAŃ: rezerwacje =================
+// Uwaga: tak jak w app_js — bez ukośnika z gwiazdką i bez podwójnego ukośnika w tekstach (Apps Script tnie stronę).
+
+const BKS = { ok: 'Potwierdzona', pending: 'Czeka na zgodę', rejected: 'Odrzucona', cancelled: 'Anulowana' };
+let BKF = null;     // formularz rezerwacji
+let BKDAY = null;   // zajętość wybranego dnia
+
+function hmToMin(hm) { const [h, m] = String(hm).split(':').map(Number); return h * 60 + m; }
+function minToHm(n) { return String(Math.floor(n / 60)).padStart(2, '0') + ':' + String(n % 60).padStart(2, '0'); }
+function bkWhen(b) { return fmtDayLong(b.date) + ', ' + b.start + '–' + b.end; }
+function fmtDayLong(ymd) { const [y, m, d] = ymd.split('-'); return DAYS_LONG[dl_weekday(ymd)] + ' ' + d + '.' + m + '.' + y; }
+function bkPill(s) { return `<span class="bk-pill ${s === BKS.ok ? 'ok' : s === BKS.pending ? 'wait' : 'off'}">${esc(s)}</span>`; }
+
+// Najbliższy sensowny slot: dziś od najbliższej pełnej półgodziny (jeśli zmieści się godzina w czasie pracy), inaczej następny dzień roboczy 10:00.
+function nextSlot() {
+  const n = nowWaw(), hs = dl_holidaySet(HOL);
+  const m = Math.ceil((n.hour * 60 + 15) / 30) * 30;
+  if (dl_isWorkday(n.date, hs) && m >= B.bkWork[0] * 60 && m + 60 <= B.bkWork[1] * 60) return { date: n.date, start: minToHm(m), end: minToHm(m + 60) };
+  let d = dl_addDays(n.date, 1);
+  while (!dl_isWorkday(d, hs)) d = dl_addDays(d, 1);
+  return { date: d, start: '10:00', end: '11:00' };
+}
+
+function emptyBk() {
+  const prev = store.get('stz_bk', null) || {};
+  const slot = nextSlot();
+  const stale = !prev.date || prev.date < nowWaw().date || (prev.date === nowWaw().date && hmToMin(prev.start) <= nowWaw().hour * 60);
+  return { title: '', description: '', requesterName: store.get('stz_name', '') || B.user.name, brand: '', guests: '', format: '', notes: '',
+    ...prev, ...(stale ? slot : {}) };
+}
+function saveBk() { store.set('stz_bk', BKF); }
+
+async function viewStudio() {
+  BKF = BKF || emptyBk();
+  $('#app').innerHTML = `<section class="view">
+    <div class="board-head"><div><div class="eyebrow">Studio nagrań</div><h1 class="h1">Zarezerwuj studio</h1>
+      <p class="lead" style="margin:0">Wolny termin w dni robocze ${B.bkWork[0]}:00–${B.bkWork[1]}:00 rezerwuje się od razu i trafia do kalendarza studia. Poza tymi godzinami potrzebna jest zgoda zarządzającego studiem.</p></div></div>
+    <div class="pgrid bk-grid"><div id="bkForm"></div><aside class="side" id="bkSide"></aside></div>
+    <div id="bkList" style="margin-top:28px">${skeleton(1)}</div></section>`;
+  drawBkForm(); drawBkSide(); loadDay(BKF.date); loadBkList();
+}
+
+function bkChips(k, list, opt) {
+  return `<div class="chips" data-bk="${k}">${list.map(x => `<button type="button" class="chip ${BKF[k] === x ? 'on' : ''}" data-v="${esc(x)}">${esc(x)}</button>`).join('')}</div>`;
+}
+
+function drawBkForm() {
+  const f = BKF;
+  $('#bkForm').innerHTML = `<div class="card">
+    ${fieldWrap('title', 'Tytuł projektu', `<input class="in" data-k="title" maxlength="255" value="${esc(f.title)}" placeholder="np. TC Talks z gościem z BNI">`)}
+    ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" style="min-height:120px" placeholder="Co nagrywamy, kto występuje, czego potrzebujesz od studia (światło, scenografia, prompter)…">${esc(f.description)}</textarea>`)}
+    <div class="grid3">
+      ${fieldWrap('requesterName', 'Osoba zgłaszająca', `<input class="in" data-k="requesterName" value="${esc(f.requesterName)}">`)}
+      ${fieldWrap('email', 'E-mail', `<input class="in" value="${esc(B.user.email)}" disabled>`)}
+    </div>
+    ${fieldWrap('format', 'Format wydarzenia', bkChips('format', B.bkFormats))}
+    ${fieldWrap('guests', 'Liczba gości', bkChips('guests', B.bkGuests))}
+    ${fieldWrap('brand', 'Brand', bkChips('brand', B.brands), { opt: true })}
+    ${fieldWrap('notes', 'Dodatkowe uwagi', `<textarea class="in" data-k="notes" maxlength="2000" style="min-height:80px" placeholder="np. potrzebny dodatkowy mikrofon, goście z zewnątrz">${esc(f.notes)}</textarea>`, { opt: true })}
+  </div>`;
+  $$('#bkForm [data-k]').forEach(i => i.oninput = () => { BKF[i.dataset.k] = i.value; if (i.dataset.k === 'requesterName') store.set('stz_name', i.value); saveBk(); });
+  $$('#bkForm [data-bk]').forEach(box => box.onclick = e => {
+    const b = e.target.closest('[data-v]'); if (!b) return;
+    const k = box.dataset.bk; BKF[k] = BKF[k] === b.dataset.v && k === 'brand' ? '' : b.dataset.v;
+    $$('[data-v]', box).forEach(x => x.classList.toggle('on', x.dataset.v === BKF[k]));
+    box.closest('.field').classList.remove('bad'); saveBk();
+  });
+}
+
+function timeOpts(sel, from, to) {
+  let o = '';
+  for (let m = from * 60; m <= to * 60; m += 30) o += `<option ${minToHm(m) === sel ? 'selected' : ''}>${minToHm(m)}</option>`;
+  return o;
+}
+
+function slotState() {
+  const s = hmToMin(BKF.start), e = hmToMin(BKF.end);
+  if (e - s < 30) return { cls: 'bad', txt: 'Koniec musi być co najmniej 30 min po początku.' };
+  if (BKF.date < nowWaw().date || (BKF.date === nowWaw().date && s <= nowWaw().hour * 60)) return { cls: 'bad', txt: 'Ten termin już minął.' };
+  if (!BKDAY || BKDAY.date !== BKF.date) return { cls: '', txt: 'Sprawdzam kalendarz studia…' };
+  const clash = BKDAY.busy.find(b => hmToMin(b.start) < e && hmToMin(b.end) > s);
+  if (clash) return { cls: 'bad', txt: `Nachodzi na ${clash.start}–${clash.end}${clash.label && clash.label !== 'Zajęte' ? ' (' + clash.label + ')' : ''}. Wybierz wolny slot.` };
+  const inHours = BKDAY.workday && s >= B.bkWork[0] * 60 && e <= B.bkWork[1] * 60;
+  if (!inHours) return { cls: 'wait', txt: BKDAY.workday ? `Poza godzinami pracy (${B.bkWork[0]}:00–${B.bkWork[1]}:00) — rezerwacja poczeka na zgodę zarządzającego studiem.` : 'Dzień wolny od pracy — rezerwacja poczeka na zgodę zarządzającego studiem.' };
+  return { cls: 'ok', txt: 'Termin wolny — rezerwacja potwierdzi się od razu.' };
+}
+
+function timelineHtml() {
+  const [F, T] = B.bkDay, span = (T - F) * 60;
+  const pct = m => ((Math.min(Math.max(m, F * 60), T * 60) - F * 60) / span * 100).toFixed(3) + '%';
+  const w = (a, b) => `left:${pct(a)};width:calc(${pct(b)} - ${pct(a)})`;
+  const work = BKDAY && BKDAY.workday ? `<i class="tl-work" style="${w(B.bkWork[0] * 60, B.bkWork[1] * 60)}"></i>` : '';
+  const busy = BKDAY && BKDAY.date === BKF.date ? BKDAY.busy.map(b => `<i class="tl-busy ${b.tentative ? 'tent' : ''}" style="${w(hmToMin(b.start), hmToMin(b.end))}" title="${esc(b.start + '–' + b.end + ' · ' + b.label)}"></i>`).join('') : '';
+  const st = slotState();
+  const sel = `<i class="tl-sel ${st.cls}" style="${w(hmToMin(BKF.start), hmToMin(BKF.end))}"></i>`;
+  let ticks = '';
+  for (let h = F; h <= T; h += 2) ticks += `<span style="left:${pct(h * 60)}">${h}</span>`;
+  return `<div class="tl-bar" id="tlBar">${work}${busy}${sel}</div><div class="tl-ticks">${ticks}</div>`;
+}
+
+function drawBkSide() {
+  const st = slotState();
+  const busyList = BKDAY && BKDAY.date === BKF.date
+    ? (BKDAY.busy.length ? BKDAY.busy.map(b => `<div class="bk-busy"><span class="mono">${b.start}–${b.end}</span><span class="muted">${esc(b.label)}</span></div>`).join('') : '<div class="muted" style="font-size:13px">Cały dzień wolny.</div>')
+    : '<div class="muted" style="font-size:13px">Ładuję…</div>';
+  $('#bkSide').innerHTML = `<div class="card">
+    <div class="card-t">Termin nagrania</div>
+    <input class="in" type="date" id="bkDate" value="${esc(BKF.date)}" min="${nowWaw().date}" style="padding:9px 12px">
+    <div class="muted" style="font-size:12.5px;margin:6px 0 14px">${esc(fmtDayLong(BKF.date))}${BKDAY && BKDAY.date === BKF.date && !BKDAY.workday ? ' · dzień wolny' : ''}</div>
+    ${timelineHtml()}
+    <div class="tl-legend"><span><i class="lg-work"></i>godziny pracy</span><span><i class="lg-busy"></i>zajęte</span><span><i class="lg-sel"></i>Twój wybór</span></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:14px">
+      <label class="bk-t">Od<select class="sel" id="bkStart">${timeOpts(BKF.start, B.bkDay[0], B.bkDay[1] - 0.5)}</select></label>
+      <label class="bk-t">Do<select class="sel" id="bkEnd">${timeOpts(BKF.end, B.bkDay[0] + 0.5, B.bkDay[1])}</select></label>
+    </div>
+    <div class="bk-state ${st.cls}">${esc(st.txt)}</div>
+    <button class="btn ${st.cls === 'wait' ? 'btn-g' : 'btn-p'} btn-lg" id="bkSend" style="width:100%;margin-top:14px" ${st.cls === 'bad' || !st.cls ? 'disabled' : ''}>${st.cls === 'wait' ? 'Wyślij prośbę o zgodę' : 'Zarezerwuj studio'}</button>
+    <div class="hint">Kliknij na osi czasu, żeby ustawić początek.</div>
+  </div>
+  <div class="card"><div class="card-t">Zajętość dnia</div>${busyList}</div>`;
+  $('#bkDate').onchange = e => { if (!e.target.value) return; BKF.date = e.target.value; saveBk(); drawBkSide(); loadDay(BKF.date); };
+  $('#bkStart').onchange = e => { const len = hmToMin(BKF.end) - hmToMin(BKF.start); BKF.start = e.target.value; BKF.end = minToHm(Math.min(B.bkDay[1] * 60, hmToMin(BKF.start) + Math.max(30, len))); saveBk(); drawBkSide(); };
+  $('#bkEnd').onchange = e => { BKF.end = e.target.value; saveBk(); drawBkSide(); };
+  $('#tlBar').onclick = e => {
+    const r = e.currentTarget.getBoundingClientRect(), [F, T] = B.bkDay;
+    const m = Math.round(((e.clientX - r.left) / r.width * (T - F) * 60 + F * 60) / 30) * 30;
+    const len = Math.max(30, hmToMin(BKF.end) - hmToMin(BKF.start));
+    BKF.start = minToHm(Math.min(m, T * 60 - 30)); BKF.end = minToHm(Math.min(T * 60, hmToMin(BKF.start) + len));
+    saveBk(); drawBkSide();
+  };
+  $('#bkSend').onclick = submitBooking;
+}
+
+async function loadDay(ymd) {
+  try { const d = await api('studioDay', ymd); if (d.date === BKF.date) { BKDAY = d; if (route === '/studio') drawBkSide(); } }
+  catch (e) { toast(e.message, 'bad'); }
+}
+
+async function submitBooking(e) {
+  const miss = [];
+  const need = { title: BKF.title.trim(), description: BKF.description.trim().length >= 20, requesterName: BKF.requesterName.trim(), format: BKF.format, guests: BKF.guests };
+  Object.entries(need).forEach(([k, v]) => { const f = $(`#bkForm [data-f="${k}"]`); const bad = !v; f && f.classList.toggle('bad', bad); if (f && bad) $('.err', f).textContent = k === 'description' ? 'Opisz nagranie (min. 20 znaków).' : 'To pole jest wymagane.'; if (bad) miss.push(k); });
+  if (miss.length) { toast('Uzupełnij zaznaczone pola.', 'bad'); $(`#bkForm [data-f="${miss[0]}"]`).scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+  const btn = e.currentTarget, old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+  try {
+    const b = await api('bookStudio', { ...BKF });
+    store.del('stz_bk'); BKF = null; BKDAY = null;
+    toast(b.status === BKS.ok ? 'Studio zarezerwowane — zaproszenie do kalendarza już leci.' : 'Prośba o zgodę wysłana.', 'ok');
+    nav.push('/rezerwacja/' + b.id);
+  } catch (err) { toast(err.message, 'bad'); btn.disabled = false; btn.innerHTML = old; loadDay(BKF.date); }
+}
+
+async function loadBkList() {
+  try {
+    const l = await api('listBookings');
+    const items = l.items.slice().sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+    const today = nowWaw().date;
+    const pending = items.filter(b => b.status === BKS.pending);
+    const upcoming = items.filter(b => b.status !== BKS.pending && b.date >= today);
+    const past = items.filter(b => b.status !== BKS.pending && b.date < today).reverse().slice(0, 10);
+    const row = b => `<button class="bk-row" data-go="/rezerwacja/${esc(b.id)}"><span class="bk-d"><b>${esc(b.date.split('-').reverse().slice(0, 2).join('.'))}</b><span>${esc(b.start)}–${esc(b.end)}</span></span><span class="bk-m"><span class="nm">${esc(b.title)}</span><span class="muted">${esc(b.format)} · ${esc(b.requesterName)}</span></span>${bkPill(b.status)}</button>`;
+    const sec = (t, list, hint) => list.length ? `<div class="card sec"><div class="card-t">${t}${hint ? ` <span class="dim">· ${hint}</span>` : ''}</div>${list.map(row).join('')}</div>` : '';
+    $('#bkList').innerHTML = (sec(l.canApprove ? 'Czekają na Twoją zgodę' : 'Czekają na zgodę', pending, l.canApprove ? 'poza godzinami pracy' : '') +
+      sec(l.all ? 'Nadchodzące rezerwacje studia' : 'Twoje nadchodzące rezerwacje', upcoming) + sec('Ostatnie', past)) ||
+      '<div class="empty"><div class="h">Brak rezerwacji</div>Tu pojawią się Twoje rezerwacje studia.</div>';
+  } catch (e) { $('#bkList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// --- strona rezerwacji ---
+
+async function viewBooking(id) {
+  $('#app').innerHTML = `<section class="view"><div class="sk-tile" style="height:380px"></div></section>`;
+  try { drawBooking(await api('getBooking', id)); }
+  catch (e) { $('#app').innerHTML = `<section class="view"><div class="empty"><div class="h">Nie udało się otworzyć rezerwacji</div>${esc(e.message)}</div></section>`; }
+}
+
+function drawBooking(b) {
+  const decision = b.status === BKS.rejected ? `<div class="card sec rej-banner"><span class="rej-dot">${ICON.x}</span><div><div class="w5">Odrzucona ${fmtTs(b.decidedAt)} · ${esc(b.decidedBy)}</div><div class="rej-why">${esc(b.decisionNote)}</div></div></div>`
+    : b.status === BKS.ok ? `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div><div class="w5">Studio zarezerwowane</div><div class="muted" style="font-size:13px">Wpisane do kalendarza studia${b.decidedBy ? ' · zgoda: ' + esc(b.decidedBy) + ' ' + fmtTs(b.decidedAt) : ''}.</div></div></div>`
+    : b.status === BKS.pending ? `<div class="card sec bk-wait"><div class="w5">Czeka na zgodę zarządzającego studiem</div><div class="muted" style="font-size:13px">Termin wypada poza godzinami pracy studia. Slot jest wstępnie zablokowany.</div></div>`
+    : `<div class="card sec"><div class="w5">Rezerwacja anulowana</div><div class="muted" style="font-size:13px">${esc(b.decidedBy || '')} ${fmtTs(b.decidedAt)}</div></div>`;
+  const approve = b.can.approve ? `<div class="card"><div class="card-t">Twoja decyzja</div>
+      <button class="btn btn-p btn-lg" id="bkOk" style="width:100%">Zatwierdź rezerwację</button>
+      <button class="btn-t btn rej-open" id="bkNoOpen">Odrzuć</button>
+      <div id="bkNoBox" hidden><label class="lbl" style="margin-top:14px">Powód odrzucenia</label>
+        <textarea class="in" id="bkNoIn" style="min-height:90px" placeholder="np. brak obsady studia w tym czasie, proszę o termin w godzinach pracy"></textarea>
+        <div class="hint">Uzasadnienie jest wymagane i trafi mailem do zgłaszającego.</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g btn-sm" id="bkNoCancel">Anuluj</button><button class="btn btn-sm btn-rej" id="bkNoSend">Odrzuć i wyślij</button></div></div></div>` : '';
+  const cancel = b.can.cancel ? `<div class="card"><button class="btn btn-g" id="bkCancel" style="width:100%">Anuluj rezerwację</button><div class="hint" id="bkCancelHint">Zwolni slot w kalendarzu studia.</div></div>` : '';
+  $('#app').innerHTML = `<section class="view">
+    <button class="back" data-go="/studio">${ICON.back} Studio nagrań</button>
+    <div class="bk-head"><div class="eyebrow">${esc(b.id)} · ${esc(b.format)}</div><h1 class="h1" style="margin:4px 0 10px">${esc(b.title)}</h1>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${bkPill(b.status)}<span class="bk-when">${esc(bkWhen(b))}</span>${b.inHours ? '' : '<span class="dim" style="font-size:13px">poza godzinami pracy</span>'}</div></div>
+    <div class="pgrid"><div>${decision}
+      <div class="card sec"><div class="card-t">Opis</div><div class="brief">${esc(b.description)}</div></div>
+      <div class="card sec"><dl class="kv"><dt>Termin</dt><dd>${esc(bkWhen(b))}</dd><dt>Format</dt><dd>${esc(b.format)}</dd><dt>Liczba gości</dt><dd>${esc(b.guests)}</dd>
+        <dt>Brand</dt><dd>${esc(b.brand || '—')}</dd><dt>Zgłasza</dt><dd>${esc(b.requesterName)} · <a href="mailto:${esc(b.requesterEmail)}">${esc(b.requesterEmail)}</a></dd>
+        <dt>Uwagi</dt><dd>${esc(b.notes || '—')}</dd><dt>Zgłoszono</dt><dd>${fmtTs(b.createdAt)}</dd></dl></div>
+    </div><aside class="side">${approve}${cancel}</aside></div></section>`;
+  const act = async (btn, fn, ok) => {
+    const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+    try { const nb = await fn(); toast(ok, 'ok'); drawBooking(nb); } catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.innerHTML = old; }
+  };
+  $('#bkOk') && ($('#bkOk').onclick = e => act(e.currentTarget, () => api('approveBooking', b.id), 'Zatwierdzone — wpisane do kalendarza studia.'));
+  $('#bkNoOpen') && ($('#bkNoOpen').onclick = () => { $('#bkNoBox').hidden = false; $('#bkNoOpen').hidden = true; $('#bkNoIn').focus(); });
+  $('#bkNoCancel') && ($('#bkNoCancel').onclick = () => { $('#bkNoBox').hidden = true; $('#bkNoOpen').hidden = false; });
+  $('#bkNoSend') && ($('#bkNoSend').onclick = e => {
+    const t = $('#bkNoIn').value.trim();
+    if (t.length < 10) return toast('Uzasadnij odrzucenie (min. 10 znaków).', 'bad');
+    act(e.currentTarget, () => api('rejectBooking', b.id, t), 'Rezerwacja odrzucona, zgłaszający dostał maila.');
+  });
+  // Anulowanie w dwóch kliknięciach zamiast okienka potwierdzenia.
+  $('#bkCancel') && ($('#bkCancel').onclick = e => {
+    const btn = e.currentTarget;
+    if (!btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = 'Kliknij ponownie, żeby anulować'; btn.classList.add('btn-rej'); $('#bkCancelHint').textContent = 'Rezerwacja zniknie z kalendarza studia.'; return; }
+    act(btn, () => api('cancelBooking', b.id), 'Rezerwacja anulowana.');
+  });
+}
 </script>
 
 </body>

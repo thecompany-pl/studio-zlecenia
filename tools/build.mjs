@@ -14,7 +14,7 @@ let html = rd('src/index.html').replace(/<\?!= include\('(\w+)'\) \?>/g, (_, n) 
 html = html.replace(/<!--LOADER-->[\s\S]*<!--\/LOADER-->/, () => `<script>window.TC_LOGO='data:image/svg+xml;base64,${logo}';</script>`);
 // Apps Script ucina stronę na pierwszym ukośniku z gwiazdką w skryptach — pilnujemy tego przy każdym buildzie.
 // Wycina też wszystko od podwójnego ukośnika do końca linii — dozwolone tylko jako komentarz, nigdy w tekście (np. adres URL).
-for (const f of ['app_js', 'deadline_js']) {
+for (const f of ['app_js', 'studio_js', 'deadline_js']) {
   const src = rd(`src/${f}.html`);
   if (src.includes('/' + '*')) { console.error(`BŁĄD: src/${f}.html zawiera ukośnik z gwiazdką — Apps Script utnie stronę.`); process.exit(1); }
   src.split('\n').forEach((line, i) => {

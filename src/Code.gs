@@ -49,7 +49,7 @@ var PUBLIC_URL = 'https://zlecenia-studio.tc.pl/';
 function appUrl_() { return PUBLIC_URL; }
 
 // Uruchamia się samo przy pierwszym wejściu właściciela; można też odpalić ręcznie z edytora.
-var SCHEMA_VERSION = '3';
+var SCHEMA_VERSION = '4';
 var MAX_REVISIONS = 3;
 
 function ensureSetup_() {
@@ -66,6 +66,11 @@ function ensureSetup_() {
 function migrate_() {
   Object.keys(SHEETS).forEach(function (name) {
     var sh = sh_(name), cols = SHEETS[name];
+    if (!sh) {  // nowa zakładka (np. Rezerwacje) — zakładamy pustą z nagłówkiem
+      sh = ss_().insertSheet(name);
+      sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
+      sh.setFrozenRows(1);
+    }
     var head = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0];
     cols.forEach(function (c, i) {
       if (head[i] !== c) {

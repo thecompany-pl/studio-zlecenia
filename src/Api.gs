@@ -16,6 +16,7 @@ function getBootstrap() {
     holidays: holidays_(),
     statuses: STATUSES, brands: BRANDS, categories: CATEGORIES, formats: FORMATS,
     platforms: PLATFORMS, priorities: PRIORITIES, domains: ALLOWED_DOMAINS,
+    bkGuests: BK_GUESTS, bkFormats: BK_FORMATS, bkWork: [BK_WORK_FROM, BK_WORK_TO], bkDay: [BK_DAY_FROM, BK_DAY_TO], canApprove: canApprove_(u),
     now: nowParts_(),
     appUrl: appUrl_()
   };
@@ -476,7 +477,8 @@ function getSettings() {
   return {
     access: rows_('Dostep').map(function (r) { return { email: r.email, name: r.name, role: r.role, addedBy: r.addedBy, addedAt: r.addedAt }; }),
     presets: presets_(),
-    holidays: holidays_()
+    holidays: holidays_(),
+    studioManager: studioManager_()
   };
 }
 
