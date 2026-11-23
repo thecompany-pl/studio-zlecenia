@@ -148,7 +148,7 @@ const EMPTY = () => ({
   title: '', description: '', requesterName: store.get('stz_name', '') || B.user.name, ownerEmail: B.user.email,
   brand: '', category: '', formats: [], platforms: [], priority: '', materialsLink: '', publishDate: '',
   scriptFiles: [], tcMode: 'text', tcText: '', timecodesFile: null, cover: null, coverThumb: '',
-  presetKey: '', workDays: 1
+  presetKey: '', workDays: 1, linkedRea: ''
 });
 const W = { step: 0, d: null, touched: {}, tried: {}, dir: 1, sending: false, pending: new Map() };
 const STEPS = 4;
@@ -590,7 +590,7 @@ async function submitWizard() {
     const res = await api('submitRequest', {
       title: d.title.trim(), description: d.description.trim(), requesterName: d.requesterName.trim(), ownerEmail: d.ownerEmail.trim(),
       brand: d.brand, category: d.category, formats: d.formats, platforms: d.platforms, priority: d.priority,
-      materialsLink: d.materialsLink.trim(), publishDate: d.publishDate,
+      materialsLink: d.materialsLink.trim(), publishDate: d.publishDate, linkedRea: d.linkedRea || '',
       scriptFiles: d.scriptFiles.filter(f => f.meta).map(f => f.meta),
       timecodesFile: d.tcMode === 'file' && d.timecodesFile && d.timecodesFile.meta ? d.timecodesFile.meta : null,
       timecodes: d.tcMode === 'text' ? rows : [],

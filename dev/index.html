@@ -443,6 +443,8 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .mo-ev.tent{background:#9d9da6}
 .mo-ev.link{cursor:pointer}
 .mo-more{font-size:11px;color:var(--mut)}
+.btn.is-off{opacity:.45;box-shadow:none}
+.row-axis{display:block;margin-top:8px;max-width:520px}
 
 @media (max-width:900px){
   .start-grid,.checks{grid-template-columns:1fr}
@@ -580,6 +582,15 @@ var SR_WORK = [9, 17];         // godziny pracy studia
 
 function sr_min(hm) { var p = String(hm).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
 function sr_hm(n) { n = Math.max(0, Math.min(24 * 60, n)); return dl_pad(Math.floor(n / 60)) + ':' + dl_pad(n % 60); }
+// Data istniejąca w kalendarzu (2026-11-31 albo 2026-13-01 nie przejdą — Date by je po cichu przewinął).
+function sr_validDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && dl_addDays(d, 0) === d; }
+// Godzina 'HH:MM' w dobie (00:00–23:59) albo dokładnie 24:00, gdy allow24.
+function sr_validHm(hm, allow24) {
+  var m = /^(\d{2}):(\d{2})$/.exec(String(hm || ''));
+  if (!m) return false;
+  var h = Number(m[1]), mi = Number(m[2]);
+  return mi < 60 && (h < 24 || (!!allow24 && h === 24 && mi === 0));
+}
 function sr_daysInMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); } // m: 1–12
 
 // Blok zajętości ekipy: od gotowości minus dojazd do końca plus zwijanie i dojazd. Zwraca minuty od północy.
@@ -640,7 +651,8 @@ function sr_dates(rule, holidays) {
     out.push({ date: target, original: d, shifted: target !== d });
   }
   if (rule.type === 'manual') {
-    (rule.dates || []).slice().sort().forEach(function (d) { if (/^\d{4}-\d{2}-\d{2}$/.test(d)) push(d, false); });
+    (rule.dates || []).slice().sort().forEach(function (d) { if (sr_validDate(d)) push(d, false); });
+    out.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     return out;
   }
   if (rule.type === 'weekly' || rule.type === 'biweekly') {
@@ -654,6 +666,7 @@ function sr_dates(rule, holidays) {
       if (rule.type === 'biweekly' && week % 2) continue;
       if (wd.indexOf(dl_weekday(d)) >= 0) push(d, false);
     }
+    out.sort(function (a, b) { return a.date < b.date ? -1 : 1; });  // przesunięcie ze święta może zmienić kolejność
     return out;
   }
   var y = Number(rule.start.slice(0, 4)), m = Number(rule.start.slice(5, 7));
@@ -680,12 +693,13 @@ function sr_describe(rule) {
   var N = { '1': 'pierwszy', '2': 'drugi', '3': 'trzeci', '4': 'czwarty', '5': 'piąty', '-1': 'ostatni' };
   if (!rule || !rule.type) return 'jednorazowo';
   if (rule.type === 'manual') return 'wybrane daty';
-  if (rule.type === 'weekly' || rule.type === 'biweekly') return (rule.type === 'weekly' ? 'co tydzień' : 'co 2 tygodnie') + ': ' + (rule.weekdays || []).map(function (w) { return D[w]; }).join(', ');
-  if (rule.type === 'monthlyDay') return 'co miesiąc, ' + rule.day + '. dnia';
-  return 'co miesiąc, ' + N[String(rule.nth)] + ' ' + D[rule.weekday];
+  if (rule.type === 'weekly' || rule.type === 'biweekly') return (rule.type === 'weekly' ? 'co tydzień' : 'co 2 tygodnie') + ': ' + (Array.isArray(rule.weekdays) ? rule.weekdays : []).map(function (w) { return D[w] || ''; }).join(', ');
+  if (rule.type === 'monthlyDay') return 'co miesiąc, ' + Number(rule.day) + '. dnia';
+  if (rule.type === 'monthlyNth') return 'co miesiąc, ' + (N[String(rule.nth)] || '') + ' ' + (D[rule.weekday] || '');
+  return 'seria';
 }
 
-if (typeof module !== 'undefined') module.exports = { sr_dates: sr_dates, sr_outOfHours: sr_outOfHours, sr_conflict: sr_conflict, sr_overlaps: sr_overlaps, sr_block: sr_block, sr_nthWeekday: sr_nthWeekday, sr_describe: sr_describe };
+if (typeof module !== 'undefined') module.exports = { sr_validDate: sr_validDate, sr_validHm: sr_validHm, sr_dates: sr_dates, sr_outOfHours: sr_outOfHours, sr_conflict: sr_conflict, sr_overlaps: sr_overlaps, sr_block: sr_block, sr_nthWeekday: sr_nthWeekday, sr_describe: sr_describe };
 </script>
 
   <script>window.TC_LOGO='data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPHN2ZyBpZD0iV2Fyc3R3YV8yIiBkYXRhLW5hbWU9IldhcnN0d2EgMiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB2aWV3Qm94PSIwIDAgMTczOS4xOCAyODMuNDYiPgogIDxkZWZzPgogICAgCiAgPC9kZWZzPgogIDxnIGlkPSJXYXJzdHdhXzEiIGRhdGEtbmFtZT0iV2Fyc3R3YSAxIj4KICAgIDxnPgogICAgICA8cGF0aCBjbGFzcz0iY2xzLTIiIGZpbGw9IiMxMjE2MzUiIGQ9Ik0xNTU3LjksNjUuMjJoLTI5LjAybDU1LjQ1LDE1My43NC01Ljg5LDE1LjhjLTMuMjYsOS42Ny03LjQsMTYuMzMtMTIuNDMsMTkuOTctNS4wMywzLjY0LTEyLjA1LDUuNDYtMjEuMDUsNS40NmwtNy4xOC0uNTh2MjEuNTVsOS45MiwxLjg2LDUuMDMuNDRjMjEuMDcsMCwzNi40NC0xMi45Myw0Ni4xMS0zOC43OWw2Mi41LTE3OS40NWgtMjguNDVsLTM2LjIxLDExNi41Mi0zOC43OS0xMTYuNTJaTTEzODMuNDksNjUuMjJ2MTU1LjQ1aDI2LjU4di0xMTAuNzdjMy42NC03LjQ3LDguNzEtMTMuNTEsMTUuMjMtMTguMSw2LjUxLTQuNiwxNC4wOC02LjksMjIuNy02LjksMTAuNjMsMCwxOC40NiwyLjY4LDIzLjQ5LDguMDUsNS4wMyw1LjM2LDcuNTksMTMuNjQsNy42OSwyNC44NXYxMDIuODZoMjYuNTh2LTEwMi43MWMtLjI5LTM3LjA3LTE2Ljg2LTU1LjYtNDkuNzEtNTUuNi0xOS4xNSwwLTM0LjY3LDcuNDctNDYuNTUsMjIuNDFsLS44Ni0xOS41NWgtMjUuMTRaTTEyNTMuOSwxOTMuMzhjLTUuNTYtNC43LTguMzQtMTEuMjEtOC4zNC0xOS41NSwwLTE5LjA2LDE2LjI5LTI4LjU5LDQ4Ljg1LTI4LjU5aDIwLjgzdjMxLjljLTMuMzYsNi44OS04Ljc3LDEyLjQ5LTE2LjIzLDE2LjgxLTcuNDgsNC4zLTE1LjM3LDYuNDctMjMuNzEsNi40N3MtMTUuODUtMi4zNS0yMS40LTcuMDRNMTM0Ny4yOSwyMjAuNjd2LTIuMjljLTMuNjQtOC40My01LjQ2LTE5Ljc4LTUuNDYtMzQuMDV2LTcxLjU1Yy0uMzgtMTUuNzEtNS42NS0yOC4wNC0xNS44LTM2Ljk5LTEwLjE2LTguOTYtMjQuMTktMTMuNDMtNDIuMS0xMy40My0xMS4zMSwwLTIxLjY4LDIuMTEtMzEuMTEsNi4zMi05LjQzLDQuMjItMTYuOSw5Ljk0LTIyLjQxLDE3LjE3LTUuNTEsNy4yMy04LjI2LDE0LjczLTguMjYsMjIuNDloMjYuNzNjMC02LjgsMy4yMS0xMi41OSw5LjYyLTE3LjM4LDYuNDItNC43OSwxNC4zNy03LjE5LDIzLjg1LTcuMTksMTAuODIsMCwxOS4wMSwyLjc2LDI0LjU3LDguMjcsNS41NSw1LjUxLDguMzMsMTIuOTEsOC4zMywyMi4ydjEyLjIxaC0yNS44NmMtMjIuMzIsMC0zOS42Miw0LjQ4LTUxLjk0LDEzLjQzLTEyLjMsOC45Ni0xOC40NiwyMS41NC0xOC40NiwzNy43MiwwLDEzLjMxLDQuOTEsMjQuMzEsMTQuNzMsMzIuOTgsOS44MSw4LjY2LDIyLjM4LDEzLDM3LjcxLDEzLDE3LjE1LDAsMzEuODktNi40MSw0NC4yNS0xOS4yNS45Niw3Ljg1LDIuMiwxMy4zMSwzLjc0LDE2LjM3aDI3Ljg4Wk0xMTUxLjgyLDE4Ni43Yy03LjUyLDEwLjEtMTcuNjUsMTUuMTYtMzAuMzgsMTUuMTYtMTYuMzgsMC0yOC41NS03LjA5LTM2LjQ5LTIxLjI3di03NC4yN2M4LjA0LTE0LjI3LDIwLjExLTIxLjQxLDM2LjIxLTIxLjQxLDEzLjAyLDAsMjMuMjcsNS4wOCwzMC43NCwxNS4yMyw3LjQ4LDEwLjE1LDExLjIxLDI0LDExLjIxLDQxLjUyLDAsMTkuOTItMy43NiwzNC45NC0xMS4yOCw0NS4wNU0xMTg5LjY3LDE0Mi4yM2MwLTI1LjEtNS40My00NC42OC0xNi4zLTU4Ljc3LTEwLjg4LTE0LjA3LTI1LjY1LTIxLjExLTQ0LjMyLTIxLjExcy0zNC4zLDYuNy00NS4xMiwyMC4xMWwtMS4yOS0xNy4yNWgtMjQuMjl2MjE1LjIyaDI2LjU5di03NC44NWMxMC44MiwxMS45NywyNS42NiwxNy45Niw0NC41MywxNy45NnMzMy4xNC03LjIzLDQzLjk2LTIxLjY5YzEwLjgyLTE0LjQ3LDE2LjIzLTMzLjUzLDE2LjIzLTU3LjE5di0yLjQ0Wk04MDAuMzMsNjUuMjJ2MTU1LjQ1aDI2LjU4di0xMTMuNDljNi40Mi0xNC44NSwxOC4zNC0yMi4yNywzNS43OC0yMi4yNywyMi4xMiwwLDMzLjE5LDExLjMsMzMuMTksMzMuOXYxMDEuODZoMjYuNzF2LTEwMy4xNWMxLjA1LTkuOTYsNC44NC0xNy44OCwxMS4zNS0yMy43Nyw2LjUxLTUuODksMTQuNy04Ljg0LDI0LjU2LTguODQsMTEuOTcsMCwyMC40OSwyLjc2LDI1LjU3LDguMjcsNS4wOCw1LjUxLDcuNjIsMTMuODIsNy42MiwyNC45M3YxMDIuNThoMjYuNTh2LTEwNC4xNWMtLjU4LTM2LjExLTE3LjkxLTU0LjE2LTUyLTU0LjE2LTExLjMsMC0yMS4xLDIuMy0yOS4zOSw2Ljg5LTguMjksNC42LTE1LjAxLDEwLjYzLTIwLjE5LDE4LjExLTcuODUtMTYuNjctMjIuNjUtMjUtNDQuMzktMjUtMTkuMzUsMC0zNC43Miw2LjctNDYuMTIsMjAuMTFsLS43Mi0xNy4yNWgtMjUuMTRaTTY2NC40MSw5OS44NWM4LjA1LTEwLjQ0LDE4LjYzLTE1LjY2LDMxLjc1LTE1LjY2czI0LjE2LDUuMjksMzIuMjUsMTUuODdjOC4xLDEwLjU5LDEyLjE0LDI0LjQsMTIuMTQsNDEuNDYsMCwxOS4wNi0zLjk3LDMzLjg4LTExLjkyLDQ0LjQ2LTcuOTYsMTAuNTktMTguNjgsMTUuODgtMzIuMTksMTUuODhzLTI0LjEyLTUuMjItMzIuMS0xNS42N2MtOC0xMC40NC0xMi0yNC4yOC0xMi00MS41MiwwLTE5LjQ0LDQuMDMtMzQuMzgsMTIuMDctNDQuODJNNjI1LjYzLDE0My4zOGMwLDI0LjE0LDYuNTMsNDMuNTMsMTkuNjEsNTguMTksMTMuMDcsMTQuNjUsMzAuMTQsMjEuOTcsNTEuMjEsMjEuOTcsMTMuOTksMCwyNi4zNi0zLjM0LDM3LjE0LTEwLjA2LDEwLjc3LTYuNywxOS4wNi0xNi4wNiwyNC44NS0yOC4wOSw1Ljc5LTEyLjAyLDguNjktMjUuNiw4LjY5LTQwLjczdi0xLjg2YzAtMjQuMzMtNi41My00My44Mi0xOS42MS01OC40OC0xMy4wNy0xNC42NS0zMC4yLTIxLjk3LTUxLjM2LTIxLjk3LTEzLjcsMC0yNS44OCwzLjMtMzYuNTYsOS45MS0xMC42OCw2LjYxLTE5LjAyLDE2LTI1LDI4LjE2LTUuOTksMTIuMTYtOC45OCwyNS44Ni04Ljk4LDQxLjA5djEuODZaTTUwOS40LDE4Ny4zNGMtNy4zOC05LjY3LTExLjA3LTIzLjQ3LTExLjA3LTQxLjM3di01LjAzYzAtMTguNCwzLjcyLTMyLjQ1LDExLjE0LTQyLjE3LDcuNDEtOS43MywxNy44OC0xNC41OCwzMS4zOS0xNC41OCwxMC4wNiwwLDE4LjUsMy4yMywyNS4zNSw5LjY5LDYuODUsNi40NywxMC42NiwxNC43MywxMS40MywyNC43OWgyNS4xNGMtLjc3LTE2LjY3LTYuOTItMzAuMjItMTguNDYtNDAuNjYtMTEuNTUtMTAuNDQtMjYuMDMtMTUuNjYtNDMuNDYtMTUuNjYtMTQuMTgsMC0yNi40NiwzLjI2LTM2Ljg2LDkuNzctMTAuNCw2LjUyLTE4LjM2LDE1LjY2LTIzLjkyLDI3LjQ0LTUuNTUsMTEuNzgtOC4zMywyNS4yNC04LjMzLDQwLjM3djQuNDVjMCwyNC41Miw2LjI1LDQzLjg1LDE4Ljc1LDU3Ljk4LDEyLjUxLDE0LjEyLDI5LjMzLDIxLjE5LDUwLjUsMjEuMTksMTAuNTMsMCwyMC41My0yLjQsMjkuOTUtNy4xOCw5LjQ0LTQuNzksMTYuOTgtMTEuMjEsMjIuNjMtMTkuMjYsNS42NS04LjA0LDguNzEtMTYuNTIsOS4xOS0yNS40M2gtMjUuMTRjLS43Nyw4LjYyLTQuNywxNS44MS0xMS43OCwyMS41NS03LjA5LDUuNzUtMTUuMzgsOC42My0yNC44Niw4LjYzLTEzLjcsMC0yNC4yMy00Ljg0LTMxLjYtMTQuNTJNMzUyLjY1LDc3LjY1YzcuOCw1LjAzLDEzLjkzLDEyLjA3LDE4LjM4LDIxLjEyLDQuNDUsOS4wNSw2LjY4LDE4Ljg0LDYuNjgsMjkuMzh2MS44N2gtMTA4LjMzYzEuODItMTcuNDQsOC0zMS43NywxOC41My00My4wMywxMC41My0xMS4yNiwyMy4zNy0xNi44OCwzOC41MS0xNi44OCw5LjY3LDAsMTguNDIsMi41MSwyNi4yMiw3LjU0TTM4MC44NywxOTguNDFsLTUuNDUtMy44OGMtNS42Niw3LjIzLTEyLjE0LDEyLjU4LTE5LjQ3LDE2LjA1LTcuMzMsMy40Ny0xNi4yMSw1LjIxLTI2LjY1LDUuMjFzLTIxLjA1LTMuMDYtMzAuMzktOS4xOGMtOS4zNC02LjExLTE2LjY2LTE0LjU1LTIxLjk5LTI1LjMxLTUuMzItMTAuNzYtNy45Ny0yMi40NC03Ljk3LTM1LjA3di04LjQ2aDExNi41MnYtOC4xOWMwLTIwLjExLTUuNTItMzYuMzQtMTYuNTItNDguNy0xMS4wMi0xMi4zNi0yNS4xOS0xOC41My00Mi41My0xOC41My0xMS44OCwwLTIyLjg0LDMuMzYtMzIuOSwxMC4wNi0xMC4wNiw2LjctMTcuOTYsMTYuMDQtMjMuNywyOC4wMS01Ljc1LDExLjk3LTguNjIsMjUuMTQtOC42MiwzOS41MXY2LjQ3YzAsMTQuMzcsMi45NiwyNy40NCw4LjksMzkuMjIsNS45MywxMS43OCwxNC4xNSwyMS4wNSwyNC42NCwyNy44LDEwLjQ5LDYuNzUsMjIuMDEsMTAuMTMsMzQuNTUsMTAuMTMsMjIuNzksMCwzOS45OS04LjM3LDUxLjU4LTI1LjE0TTEyMC4xMSwwaC03Ljc1djIyMC42N2g3Ljc1di05OS40N2MzLjQ1LTE1LjAyLDEwLjA5LTI3LjI5LDE5LjktMzYuODEsOS44Mi05LjUyLDIxLjQzLTE0LjI4LDM0Ljg0LTE0LjI4LDE0LjU2LDAsMjUuMTksMy45OSwzMS45LDExLjk4LDYuNyw4LDEwLjEsMjAuMzEsMTAuMTksMzYuOTZ2MTAxLjYyaDcuNzd2LTEwMS40M2MtLjEtMTkuMDYtNC4yLTMzLjMxLTEyLjI5LTQyLjc1LTguMS05LjQzLTIwLjQ3LTE0LjE1LTM3LjEzLTE0LjE1LTExLjk3LDAtMjIuODksMy40OS0zMi43NiwxMC40OC05Ljg2LDctMTcuMzMsMTYuNTItMjIuNDEsMjguNTlWMFpNMjguNzQsMjMuMjd2NDEuOTVIMHY3Ljc3aDI4Ljc0djExMS40NWMuMSwxMy41MiwyLjU5LDIzLjQxLDcuNDcsMjkuNyw0Ljg5LDYuMjgsMTIuOTgsOS40MiwyNC4yOSw5LjQyLDcuNjYsMCwxMy4wNy0uNTgsMTYuMjMtMS43M2wtMS4yOS03LjMzYy02LjA0Ljg2LTExLjE2LDEuMy0xNS4zOCwxLjMtOC40MywwLTE0LjQzLTIuNjQtMTguMDItNy45MS0zLjYtNS4yNy01LjM5LTEzLjQyLTUuMzktMjQuNDV2LTExMC40NWgzNS4zNHYtNy43N2gtMzUuMzRWMjMuMjdoLTcuOVoiPjwvcGF0aD4KICAgICAgPHJlY3QgY2xhc3M9ImNscy0xIiBmaWxsPSIjREMxNDNDIiB4PSIxNjg0LjMyIiB5PSIxNjUuNzgiIHdpZHRoPSI1NC44NiIgaGVpZ2h0PSI1NC44NiI+PC9yZWN0PgogICAgPC9nPgogIDwvZz4KPC9zdmc+';</script>
@@ -840,7 +854,7 @@ const EMPTY = () => ({
   title: '', description: '', requesterName: store.get('stz_name', '') || B.user.name, ownerEmail: B.user.email,
   brand: '', category: '', formats: [], platforms: [], priority: '', materialsLink: '', publishDate: '',
   scriptFiles: [], tcMode: 'text', tcText: '', timecodesFile: null, cover: null, coverThumb: '',
-  presetKey: '', workDays: 1
+  presetKey: '', workDays: 1, linkedRea: ''
 });
 const W = { step: 0, d: null, touched: {}, tried: {}, dir: 1, sending: false, pending: new Map() };
 const STEPS = 4;
@@ -1282,7 +1296,7 @@ async function submitWizard() {
     const res = await api('submitRequest', {
       title: d.title.trim(), description: d.description.trim(), requesterName: d.requesterName.trim(), ownerEmail: d.ownerEmail.trim(),
       brand: d.brand, category: d.category, formats: d.formats, platforms: d.platforms, priority: d.priority,
-      materialsLink: d.materialsLink.trim(), publishDate: d.publishDate,
+      materialsLink: d.materialsLink.trim(), publishDate: d.publishDate, linkedRea: d.linkedRea || '',
       scriptFiles: d.scriptFiles.filter(f => f.meta).map(f => f.meta),
       timecodesFile: d.tcMode === 'file' && d.timecodesFile && d.timecodesFile.meta ? d.timecodesFile.meta : null,
       timecodes: d.tcMode === 'text' ? rows : [],
@@ -1723,7 +1737,7 @@ function refreshReaCount() {
 function renderStudio(r) {
   if (r === '/studio') return nav.replace(B.canApproveRea && B.reaPending ? '/studio/akceptacja' : (isStudio() || B.canApproveRea) ? '/studio/kalendarz' : '/studio/nowa');
   if (r === '/studio/nowa') return viewReaWizard();
-  if (r === '/studio/gotowe') return;
+  if (r === '/studio/gotowe') return nav.replace('/studio/moje');  // ekran sukcesu rysuje submitRea; po odświeżeniu go nie ma
   if (r === '/studio/moje') return viewReaList('mine');
   if (r === '/studio/akceptacja' && B.canApproveRea) return viewReaList('pending');
   if (r === '/studio/kalendarz' && (isStudio() || B.canApproveRea)) return viewStudioCal();
@@ -1757,15 +1771,17 @@ async function ensureDays(dates) {
 function dropDays() { Object.keys(DAYCACHE).forEach(k => delete DAYCACHE[k]); }
 
 // Stan terminu: kolor + tekst. t: { date, ready, start, end, teardownMin, travelMin }
-function termState(t, skipReaId) {
-  const n = nowWaw(), b = sr_block(t);
+function termState(t, skipTermId) {
+  const n = nowWaw();
+  if (!sr_validDate(t.date) || !sr_validHm(t.ready) || !sr_validHm(t.start) || !sr_validHm(t.end, true)) return { cls: 'bad', txt: 'Nieprawidłowa data lub godzina.' };
+  const b = sr_block(t);
   if (hmMin(t.ready) > hmMin(t.start)) return { cls: 'bad', txt: 'Gotowość musi być przed startem.' };
   if (hmMin(t.end) - hmMin(t.start) < 15) return { cls: 'bad', txt: 'Koniec musi być co najmniej 15 min po starcie.' };
   if (b.from < B.rea.day[0] * 60 || b.to > B.rea.day[1] * 60) return { cls: 'bad', txt: `Realizacja z dojazdem i zwijaniem musi zmieścić się w ${B.rea.day[0]}:00–${B.rea.day[1]}:00.` };
   if (t.date < n.date || (t.date === n.date && b.from <= n.hour * 60)) return { cls: 'bad', txt: 'Ten termin już minął.' };
   const day = DAYCACHE[t.date];
   if (!day) return { cls: '', txt: 'Sprawdzam kalendarz studia…' };
-  const c = sr_conflict(t, skipReaId ? day.busy.filter(b => b.reaId !== skipReaId) : day.busy);
+  const c = sr_conflict(t, skipTermId ? day.busy.filter(x => x.termId !== skipTermId) : day.busy);
   if (c) return { cls: 'conf', txt: `Nachodzi na ${c.start}–${c.end}${c.label && !/^(Zajęte|Wstępnie zajęte)$/.test(c.label) ? ' · ' + c.label : ''}`, conflict: true };
   if (sr_outOfHours(t, hs())) return { cls: 'wait', txt: day.workday ? `Poza godzinami pracy ${B.rea.work[0]}:00–${B.rea.work[1]}:00 — wymaga zgody na pracę poza godzinami.` : 'Dzień wolny — wymaga zgody na pracę poza godzinami.', out: true };
   return { cls: 'ok', txt: 'Wolne, w godzinach pracy.' };
@@ -1773,12 +1789,12 @@ function termState(t, skipReaId) {
 
 // Oś dnia: godziny pracy, zajętość, blok ekipy (jasny) i samo wydarzenie (ciemniejsze).
 function dayAxis(date, t, opts = {}) {
-  const [F, T] = [B.rea.day[0], 23], span = (T - F) * 60;
+  const [F, T] = [7, 22], span = (T - F) * 60;
   const pct = m => ((Math.min(Math.max(m, F * 60), T * 60) - F * 60) / span * 100).toFixed(3) + '%';
   const w = (a, b) => `left:${pct(a)};width:calc(${pct(b)} - ${pct(a)})`;
   const day = DAYCACHE[date];
   const work = day && day.workday ? `<i class="tl-work" style="${w(B.rea.work[0] * 60, B.rea.work[1] * 60)}"></i>` : '';
-  const busy = day ? day.busy.filter(b => !opts.skip || b.reaId !== opts.skip).map(b => `<i class="tl-busy ${b.tentative ? 'tent' : ''}" style="${w(hmMin(b.start), hmMin(b.end))}" title="${esc(b.start + '–' + b.end + ' · ' + b.label)}"></i>`).join('') : '';
+  const busy = day ? day.busy.filter(b => !opts.skip || b.termId !== opts.skip).map(b => `<i class="tl-busy ${b.tentative ? 'tent' : ''}" style="${w(hmMin(b.start), hmMin(b.end))}" title="${esc(b.start + '–' + b.end + ' · ' + b.label)}"></i>`).join('') : '';
   let sel = '';
   if (t) {
     const st = termState(t, opts.skip), b = sr_block(t);
@@ -1795,7 +1811,7 @@ const REA_EMPTY = () => {
   const d = nextWorkdayFrom(nowWaw().date, nowWaw().hour >= 15);
   return {
     title: '', kind: '', description: '', requesterName: store.get('stz_name', '') || B.user.name, brand: '', format: '', scope: [], guests: '',
-    platform: '', platformOther: '', meetingLink: '', liveAway: false, location: '', parking: '', boardConsent: '', tech: [], delivery: '', notes: '', agenda: null,
+    platform: '', platformOther: '', meetingLink: '', liveAway: false, location: '', parking: '', boardConsent: '', tech: [], logoBrand: '', delivery: '', notes: '', agenda: null, agendaText: '',
     date: d, ready: '09:00', start: '10:00', end: '11:00', teardownMin: 0, travelMin: 0, readyAuto: true,
     repeat: false, rule: { type: 'weekly', weekdays: [dl_weekday(d)], day: Number(d.slice(8)), nth: 1, weekday: dl_weekday(d), endMode: 'count', count: 4, until: dl_addDays(d, 56), dates: [], shiftHolidays: true },
     excluded: {}, moved: {}, conflictReason: ''
@@ -1827,7 +1843,7 @@ function reaTerms() {
 function allRuleDates() {
   const d = RW.d, rule = Object.assign({}, d.rule, { start: d.date });
   if (rule.endMode === 'count') delete rule.until; else delete rule.count;
-  if (rule.type === 'manual') rule.dates = [d.date].concat(rule.dates || []);
+  if (rule.type === 'manual') { delete rule.count; delete rule.until; rule.dates = [d.date].concat(rule.dates || []); }
   return sr_dates(rule, HOL);
 }
 
@@ -1849,6 +1865,9 @@ function reaErrors(step) {
     if (away && !d.scope.length) e.scope = 'Wybierz zakres obsługi.';
     if (needsDelivery(d) && !d.delivery) e.delivery = 'Wybierz formę oddania.';
     if (d.agenda && d.agenda.status === 'up') e.agenda = 'Poczekaj, aż plik się wgra.';
+    if (d.meetingLink.length > 500) e.meetingLink = 'Maks. 500 znaków.';
+    if (d.agendaText.length > 4000) e.agenda = 'Agenda: maks. 4000 znaków.';
+    if (d.tech.includes('Tło z logo brandu') && !d.logoBrand) e.tech = 'Wybierz brand, którego logo ma być w tle.';
   }
   if (step === 3) {
     const terms = reaTerms();
@@ -1887,7 +1906,7 @@ function viewReaWizard() {
       <div>${s > 0 ? `<button class="btn btn-g" id="rBack">${ICON.back} Wstecz</button>` : '<span class="keys"><span class="kbd">Enter</span> dalej</span>'}</div>
       <div style="display:flex;align-items:center;gap:16px">
         ${s > 0 ? '<span class="keys"><span class="kbd">Esc</span> wstecz · <span class="kbd">Enter</span> dalej</span>' : ''}
-        ${s < RSTEPS - 1 ? '<button class="btn btn-p btn-lg" id="rNext">Dalej</button>' : `<button class="btn btn-p btn-lg" id="rSend">${RW.sending ? '<span class="spin"></span> Wysyłam…' : 'Wyślij do akceptacji'}</button>`}
+        ${s < RSTEPS - 1 ? `<button class="btn btn-p btn-lg ${Object.keys(reaErrors(s)).length ? 'is-off' : ''}" id="rNext" aria-disabled="${Object.keys(reaErrors(s)).length ? 'true' : 'false'}">Dalej</button>` : `<button class="btn btn-p btn-lg" id="rSend">${RW.sending ? '<span class="spin"></span> Wysyłam…' : 'Wyślij do akceptacji'}</button>`}
       </div></div></section>`;
   bindRea();
   if (s === 3) loadWhenDays();
@@ -1928,13 +1947,13 @@ function rStepBrief() {
     ${away ? rField('scope', 'Zakres obsługi video', rChips('scope', B.rea.scope, true), { hint: 'Możesz wybrać kilka.' }) : ''}
     ${where !== 'location' && !away ? rField('guests', 'Liczba osób przed kamerą', rChips('guests', B.rea.guests, false)) : ''}
     ${k === 'webinar' || k === 'live' ? rField('platform', 'Platforma', rChips('platform', B.rea.platforms, false) + (d.platform === 'inna' ? `<input class="in" data-k="platformOther" value="${esc(d.platformOther)}" placeholder="Jaka platforma?" style="margin-top:10px">` : '')) : ''}
-    ${k === 'webinar' || k === 'live' ? rField('meetingLink', 'Link do spotkania / klucz streamu', `<input class="in" data-k="meetingLink" value="${esc(d.meetingLink)}" placeholder="możesz dosłać później w komentarzu">`, { opt: true }) : ''}
+    ${k === 'webinar' || k === 'live' ? rField('meetingLink', 'Link do spotkania / klucz streamu', `<input class="in" data-k="meetingLink" maxlength="500" value="${esc(d.meetingLink)}" placeholder="możesz dosłać później w komentarzu">`, { opt: true }) : ''}
     ${away ? `<div class="grid3">${rField('location', 'Lokalizacja', `<input class="in" data-k="location" value="${esc(d.location)}" placeholder="ulica, numer, miasto">`)}
       ${rField('parking', 'Miejsce parkingowe dla operatora', rChips('parking', ['Tak', 'Nie'], false))}</div>` : ''}
     ${rField('boardConsent', 'Zgoda Zarządu TC na nagrywanie', rChips('boardConsent', B.rea.consent, false) + (d.boardConsent === 'Nie' ? '<div class="warn-inline">Bez zgody Zarządu studio nie zaakceptuje realizacji — zdobądź ją przed terminem i daj znać w komentarzu.</div>' : ''))}
-    ${tech.length ? rField('tech', 'Wymagania techniczne', `<div class="checks" data-rcheck="tech">${tech.map(x => `<label class="chk"><input type="checkbox" value="${esc(x)}" ${d.tech.includes(x) ? 'checked' : ''}> ${esc(x)}</label>`).join('')}</div>`, { opt: true }) : ''}
+    ${tech.length ? rField('tech', 'Wymagania techniczne', `<div class="checks" data-rcheck="tech">${tech.map(x => `<label class="chk"><input type="checkbox" value="${esc(x)}" ${d.tech.includes(x) ? 'checked' : ''}> ${esc(x)}</label>`).join('')}</div>` + (d.tech.includes('Tło z logo brandu') ? `<div class="lbl" style="margin:12px 0 8px">Logo którego brandu w tle?</div>${rChips('logoBrand', B.brands, false)}` : ''), { opt: true }) : ''}
     ${needsDelivery(d) ? rField('delivery', 'Forma oddania nagrania', rChips('delivery', B.rea.delivery, false), { hint: d.delivery === 'Zmontowany materiał' ? 'Po realizacji założysz jednym kliknięciem powiązane zlecenie montażowe.' : '' }) : ''}
-    ${rField('agenda', 'Agenda / scenariusz', agendaHtml(), { opt: true })}
+    ${rField('agenda', 'Agenda / scenariusz', agendaHtml() + `<textarea class="in" data-k="agendaText" maxlength="4000" style="min-height:90px;margin-top:10px" placeholder="…albo wpisz agendę: 16:00 powitanie, 16:05 networking, 16:20 rozmowa…">${esc(d.agendaText)}</textarea>`, { opt: true, hint: 'Plik albo tekst — jak Ci wygodniej.' })}
     ${rField('notes', 'Dodatkowe uwagi', `<textarea class="in" data-k="notes" maxlength="2000" style="min-height:90px" placeholder="np. goście z zewnątrz, potrzebny dodatkowy mikrofon">${esc(d.notes)}</textarea>`, { opt: true })}
   </div>`;
 }
@@ -1950,7 +1969,7 @@ async function uploadAgenda(file) {
   if (!['pdf', 'docx', 'doc', 'pptx', 'txt', 'md', 'odt', 'rtf'].includes(ext)) return toast('Niedozwolony typ pliku: .' + ext, 'bad');
   if (file.size > 10 * 1024 * 1024) return toast('Plik ma ponad 10 MB.', 'bad');
   const a = RW.d.agenda = { name: file.name, size: file.size, status: 'up', p: 0.02 };
-  const redraw = () => { if (route === '/studio/nowa' && RW.step === 2 && $('[data-f="agenda"]')) { $('[data-f="agenda"]').outerHTML = rField('agenda', 'Agenda / scenariusz', agendaHtml(), { opt: true }); bindAgenda(); } };
+  const redraw = () => { if (route === '/studio/nowa' && RW.step === 2) rerenderRea(); };
   redraw();
   try {
     let meta = null;
@@ -2061,7 +2080,7 @@ function seriesEditor() {
     ${r.type === 'monthlyDay' ? `<label class="bk-t" style="margin-top:12px;max-width:200px">Dzień miesiąca<input class="in" type="number" min="1" max="31" data-r="day" value="${esc(r.day)}" style="padding:9px 12px"></label>` : ''}
     ${r.type === 'monthlyNth' ? `<div class="when-row" style="margin-top:12px"><label class="bk-t">Który<select class="sel" data-r="nth">${[[1, 'pierwszy'], [2, 'drugi'], [3, 'trzeci'], [4, 'czwarty'], [5, 'piąty'], [-1, 'ostatni']].map(([v, l]) => `<option value="${v}" ${Number(r.nth) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="bk-t">Dzień tygodnia<select class="sel" data-r="weekday">${[1, 2, 3, 4, 5, 6, 0].map(w => `<option value="${w}" ${Number(r.weekday) === w ? 'selected' : ''}>${DAYS_LONG[w]}</option>`).join('')}</select></label></div>` : ''}
-    ${r.type === 'manual' ? `<div class="when-row" style="margin-top:12px"><input class="in" type="date" id="srAdd" min="${nowWaw().date}" style="padding:9px 12px;max-width:220px"><button type="button" class="btn btn-g btn-sm" id="srAddBtn" style="height:42px">Dodaj datę</button><span class="hint">Pierwszy termin z góry też jest w serii.</span></div>` : ''}
+    ${r.type === 'manual' ? `<div class="when-row" style="margin-top:12px"><input class="in" type="date" id="srAdd" min="${esc(dl_addDays(RW.d.date, 1))}" style="padding:9px 12px;max-width:220px"><button type="button" class="btn btn-g btn-sm" id="srAddBtn" style="height:42px">Dodaj datę</button><span class="hint">Pierwszy termin z góry też jest w serii.</span></div>` : ''}
     <label class="chk" style="margin-top:12px"><input type="checkbox" data-r="shiftHolidays" ${r.shiftHolidays ? 'checked' : ''}> Przesuwaj wystąpienia ze świąt na następny dzień roboczy</label>
     <div class="sr-list"><div class="sr-head">${nTerms(terms.length)} · ${esc(sr_describe(Object.assign({}, r)))} · te same godziny w każdym</div>${rows || '<div class="muted" style="padding:10px 0">Wzorzec nie daje żadnej daty.</div>'}</div>
   </div>`;
@@ -2078,7 +2097,7 @@ function rStepSummary() {
   const kv = [['Rodzaj', k.label], ['Opis', d.description], ['Zgłasza', d.requesterName + ' · ' + B.user.email], ['Brand', d.brand], ['Format', d.kind === 'studio' ? d.format : ''],
     ['Zakres', isAwayD(d) ? d.scope.join(', ') : ''], ['Liczba osób', isAwayD(d) ? '' : d.guests], ['Platforma', d.platform === 'inna' ? d.platformOther : d.platform], ['Link', d.meetingLink],
     ['Lokalizacja', isAwayD(d) ? d.location : ''], ['Parking', isAwayD(d) ? d.parking : ''], ['Zgoda Zarządu TC', d.boardConsent], ['Wymagania', d.tech.join(', ')],
-    ['Forma oddania', needsDelivery(d) ? d.delivery : ''], ['Agenda', d.agenda && d.agenda.meta ? d.agenda.name : ''], ['Uwagi', d.notes], ['Uzasadnienie terminu', terms.some(t => termState(t).conflict) ? d.conflictReason : '']]
+    ['Forma oddania', needsDelivery(d) ? d.delivery : ''], ['Agenda', [d.agenda && d.agenda.meta ? d.agenda.name : '', d.agendaText].filter(Boolean).join('\n')], ['Logo w tle', d.tech.includes('Tło z logo brandu') ? d.logoBrand : ''], ['Uwagi', d.notes], ['Uzasadnienie terminu', terms.some(t => termState(t).conflict) ? d.conflictReason : '']]
     .filter(x => x[1]);
   return `<div class="card sec"><dl class="kv">${kv.map(([a, b]) => `<dt>${esc(a)}</dt><dd style="white-space:pre-wrap">${esc(b)}</dd>`).join('')}</dl></div>
     <div class="card"><div class="card-t">${terms.length > 1 ? `Seria · ${nTerms(terms.length)} · ${esc(sr_describe(d.rule))}` : 'Termin'}</div>
@@ -2086,11 +2105,17 @@ function rStepSummary() {
     </div>`;
 }
 
+function syncNext() {
+  const n = $('#rNext'); if (!n || !RW) return;
+  const off = Object.keys(reaErrors(RW.step)).length > 0;
+  n.classList.toggle('is-off', off); n.setAttribute('aria-disabled', off ? 'true' : 'false');
+}
 function rerenderRea() {
   const b = $('#rBody'); if (!b) return;
   const a = document.activeElement, keep = a && a.dataset && a.dataset.k, pos = keep && a.selectionStart;
   b.innerHTML = [rStepTitle, rStepKind, rStepBrief, rStepWhen, rStepSummary][RW.step]();
   bindReaBody();
+  syncNext();
   if (keep) { const n = $(`#rBody [data-k="${keep}"]`); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} } }
 }
 
@@ -2108,7 +2133,7 @@ function bindRea() {
 
 function bindReaBody() {
   const d = RW.d;
-  $$('#rBody [data-k]').forEach(i => i.oninput = () => { d[i.dataset.k] = i.value; if (i.dataset.k === 'requesterName') store.set('stz_name', i.value); saveRea(); if (RW.tried[RW.step]) markErrs(); });
+  $$('#rBody [data-k]').forEach(i => i.oninput = () => { d[i.dataset.k] = i.value; if (i.dataset.k === 'requesterName') store.set('stz_name', i.value); saveRea(); if (RW.tried[RW.step]) markErrs(); syncNext(); });
   $$('#rBody [data-rc]').forEach(box => box.onclick = e => {
     const b = e.target.closest('[data-v]'); if (!b) return;
     const k = box.dataset.rc, v = b.dataset.v;
@@ -2116,27 +2141,27 @@ function bindReaBody() {
     else d[k] = d[k] === v && (k === 'brand') ? '' : v;
     saveRea(); rerenderRea();
   });
-  $$('#rBody [data-rbool]').forEach(box => box.onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; d[box.dataset.rbool] = b.dataset.v === '1'; saveRea(); rerenderRea(); });
+  $$('#rBody [data-rbool]').forEach(box => box.onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; d[box.dataset.rbool] = b.dataset.v === '1'; if (d.liveAway && !d.teardownMin) d.teardownMin = 30; saveRea(); rerenderRea(); });
   $$('#rBody [data-rcheck] input').forEach(c => c.onchange = () => { const k = c.closest('[data-rcheck]').dataset.rcheck; d[k] = $$(`#rBody [data-rcheck="${k}"] input:checked`).map(x => x.value); saveRea(); rerenderRea(); });
   $$('#rBody [data-kind]').forEach(b => b.onclick = () => { d.kind = b.dataset.kind; if (d.kind === 'wyjazd' && !d.teardownMin) d.teardownMin = 30; saveRea(); rerenderRea(); setTimeout(() => reaStep(1), 180); });
   bindAgenda();
   // termin
   $$('#rBody [data-t]').forEach(i => i.onchange = () => {
     const k = i.dataset.t, len = hmMin(d.end) - hmMin(d.start), lead = hmMin(d.start) - hmMin(d.ready);
-    if (k === 'date') { if (!i.value) return; d.date = i.value; d.excluded = {}; d.moved = {}; if (d.rule.type === 'weekly' || d.rule.type === 'biweekly') { if (!d.rule.weekdays.length) d.rule.weekdays = [dl_weekday(d.date)]; } d.rule.day = Number(d.date.slice(8)); d.rule.weekday = dl_weekday(d.date); }
+    if (k === 'date') { if (!i.value || !sr_validDate(i.value)) return; setFirstDate(i.value); }
     else if (k === 'start') { d.start = i.value; d.end = minHm(Math.min(24 * 60, hmMin(d.start) + Math.max(15, len))); d.ready = minHm(Math.max(B.rea.day[0] * 60, hmMin(d.start) - Math.max(0, lead))); }
     else if (k === 'ready') { d.ready = i.value; d.readyAuto = false; }
     else if (k === 'end') d.end = i.value;
     else d[k] = Number(i.value);
     saveRea(); rerenderRea(); loadWhenDays();
   });
-  $$('#rBody [data-day]').forEach(b => b.onclick = () => { d.date = b.dataset.day; d.excluded = {}; d.moved = {}; d.rule.day = Number(d.date.slice(8)); d.rule.weekday = dl_weekday(d.date); saveRea(); rerenderRea(); loadWhenDays(); });
+  $$('#rBody [data-day]').forEach(b => b.onclick = () => { setFirstDate(b.dataset.day); saveRea(); rerenderRea(); loadWhenDays(); });
   const ax = $('#rAxis');
   if (ax) ax.onclick = e => {
-    const r = ax.getBoundingClientRect(), F = B.rea.day[0], T = 23;
+    const r = ax.getBoundingClientRect(), F = 7, T = 22;
     const m = Math.round(((e.clientX - r.left) / r.width * (T - F) * 60 + F * 60) / 15) * 15;
     const len = hmMin(d.end) - hmMin(d.start), lead = hmMin(d.start) - hmMin(d.ready);
-    d.start = minHm(Math.max(F * 60 + lead, Math.min(m, 24 * 60 - len))); d.end = minHm(hmMin(d.start) + len); d.ready = minHm(hmMin(d.start) - lead);
+    d.start = minHm(Math.max(B.rea.day[0] * 60 + lead, Math.min(m, 24 * 60 - len))); d.end = minHm(hmMin(d.start) + len); d.ready = minHm(hmMin(d.start) - lead);
     saveRea(); rerenderRea();
   };
   $('#rRepeat') && ($('#rRepeat').onchange = e => { d.repeat = e.target.checked; saveRea(); rerenderRea(); loadWhenDays(); });
@@ -2148,10 +2173,33 @@ function bindReaBody() {
     saveRea(); rerenderRea(); loadWhenDays();
   });
   $('#rBody [data-wd]') && ($('#rBody [data-wd]').onclick = e => { const b = e.target.closest('[data-v]'); if (!b) return; const w = Number(b.dataset.v); d.rule.weekdays = d.rule.weekdays.includes(w) ? d.rule.weekdays.filter(x => x !== w) : d.rule.weekdays.concat(w); d.excluded = {}; d.moved = {}; saveRea(); rerenderRea(); loadWhenDays(); });
-  $('#srAddBtn') && ($('#srAddBtn').onclick = () => { const v = $('#srAdd').value; if (!v) return; if (!d.rule.dates.includes(v) && v !== d.date) d.rule.dates = d.rule.dates.concat(v).sort(); saveRea(); rerenderRea(); loadWhenDays(); });
+  $('#srAddBtn') && ($('#srAddBtn').onclick = () => {
+    const v = $('#srAdd').value;
+    if (!v || !sr_validDate(v)) return;
+    if (v <= d.date) return toast('Dodawaj daty późniejsze niż pierwszy termin (albo zmień pierwszy termin u góry).', 'bad');
+    if (reaTerms().length >= B.rea.max) return toast('Seria może mieć maksymalnie ' + B.rea.max + ' terminów.', 'bad');
+    if (!d.rule.dates.includes(v)) d.rule.dates = d.rule.dates.concat(v).sort();
+    saveRea(); rerenderRea(); loadWhenDays();
+  });
   $$('#rBody [data-excl]').forEach(b => b.onclick = () => { d.excluded[b.dataset.excl] = true; saveRea(); rerenderRea(); });
   $$('#rBody [data-incl]').forEach(b => b.onclick = () => { delete d.excluded[b.dataset.incl]; saveRea(); rerenderRea(); });
-  $$('#rBody [data-move]').forEach(i => i.onchange = () => { if (!i.value) return; if (i.value === i.dataset.move) delete d.moved[i.dataset.move]; else d.moved[i.dataset.move] = i.value; saveRea(); rerenderRea(); loadWhenDays(); });
+  $$('#rBody [data-move]').forEach(i => i.onchange = () => {
+    if (!i.value || !sr_validDate(i.value)) return;
+    const orig = i.dataset.move;
+    if (reaTerms().some(t => t.original !== orig && t.date === i.value)) { toast('Ten dzień jest już w serii — wybierz inny albo wyklucz tamten termin.', 'bad'); rerenderRea(); return; }
+    if (i.value === orig) delete d.moved[orig]; else d.moved[orig] = i.value;
+    saveRea(); rerenderRea(); loadWhenDays();
+  });
+}
+
+// Zmiana pierwszego terminu: wzorzec serii dopasowuje się tak, żeby ta data była pierwszym wystąpieniem.
+function setFirstDate(v) {
+  const d = RW.d, w = dl_weekday(v), day = Number(v.slice(8));
+  d.date = v; d.excluded = {}; d.moved = {};
+  if ((d.rule.type === 'weekly' || d.rule.type === 'biweekly') && !d.rule.weekdays.includes(w)) d.rule.weekdays = d.rule.weekdays.concat(w).sort();
+  d.rule.day = day; d.rule.weekday = w;
+  d.rule.nth = day + 7 > sr_daysInMonth(Number(v.slice(0, 4)), Number(v.slice(5, 7))) && day > 28 ? -1 : Math.ceil(day / 7);
+  d.rule.dates = (d.rule.dates || []).filter(x => x > v);
 }
 
 function markErrs() {
@@ -2179,6 +2227,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
     if (e.target.tagName === 'TEXTAREA' && !(e.metaKey || e.ctrlKey)) return;
     if (e.target.closest && (e.target.closest('button') || e.target.tagName === 'SELECT')) return;
+    if (e.target.matches && e.target.matches('[data-r], #srAdd, [data-move], input[type=number], input[type=date]')) { e.preventDefault(); e.target.blur(); return; }
     e.preventDefault();
     RW.step < RSTEPS - 1 ? reaStep(1) : submitRea();
   }
@@ -2192,7 +2241,7 @@ async function submitRea() {
     title: d.title, kind: d.kind, description: d.description, requesterName: d.requesterName, brand: d.brand, format: d.format, scope: d.scope, guests: d.guests,
     platform: d.platform === 'inna' ? d.platformOther : d.platform, meetingLink: d.meetingLink, liveAway: d.liveAway, location: d.location, parking: d.parking,
     boardConsent: d.boardConsent, tech: kindOf(d.kind).where === 'location' ? [] : d.tech, delivery: needsDelivery(d) ? d.delivery : '', notes: d.notes,
-    agendaFile: d.agenda && d.agenda.meta ? d.agenda.meta : null, teardownMin: d.teardownMin, travelMin: isAwayD(d) ? d.travelMin : 0,
+    agendaFile: d.agenda && d.agenda.meta ? d.agenda.meta : null, agendaText: d.agendaText, logoBrand: d.logoBrand, teardownMin: d.teardownMin, travelMin: isAwayD(d) ? d.travelMin : 0,
     seriesRule: d.repeat ? Object.assign({}, d.rule, { start: d.date }) : null, conflictReason: d.conflictReason,
     terms: terms.map(t => ({ date: t.date, ready: t.ready, start: t.start, end: t.end }))
   };
@@ -2218,7 +2267,8 @@ async function viewReaList(scope) {
     const list = await api('listRealizations', scope);
     if (scope === 'pending') { B.reaPending = list.length; renderTop(); }
     list.sort((a, b) => scope === 'pending' ? ((a.next || {}).date || '9').localeCompare((b.next || {}).date || '9') : String(b.createdAt).localeCompare(String(a.createdAt)));
-    $('#reaList').innerHTML = list.length ? `<div class="card">${list.map(reaRow).join('')}</div>`
+    if (scope === 'pending') { try { await ensureDays([...new Set(list.filter(r => r.next).map(r => r.next.date))]); } catch (e) {} }
+    $('#reaList').innerHTML = list.length ? `<div class="card">${list.map(r => reaRow(r, scope === 'pending')).join('')}</div>`
       : `<div class="empty"><div class="h">${scope === 'pending' ? 'Nic nie czeka na akceptację' : 'Nie masz jeszcze zleceń studyjnych'}</div>${scope === 'pending' ? 'Nowe zgłoszenia pojawią się tutaj.' : 'Zgłoś nagranie, webinar albo transmisję — zajmie Ci to kilka minut.'}</div>`;
   } catch (e) { $('#reaList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
@@ -2227,10 +2277,11 @@ function reaBadges(r) {
   return [r.count > 1 ? `<span class="badge-s">seria ×${r.count}</span>` : '', r.outOfHours ? '<span class="badge-s warn">poza godzinami</span>' : '',
     r.conflict ? '<span class="badge-s bad">kolizja</span>' : '', r.boardConsent === 'Nie' ? '<span class="badge-s bad">brak zgody Zarządu</span>' : ''].join('');
 }
-function reaRow(r) {
+function reaRow(r, withAxis) {
   const n = r.next;
+  const axis = withAxis && n && DAYCACHE[n.date] ? `<span class="row-axis">${dayAxis(n.date, Object.assign({ teardownMin: 0, travelMin: 0 }, n), { mini: true, skip: (DAYCACHE[n.date].busy.find(b => b.reaId === r.id) || {}).termId })}</span>` : '';
   return `<button class="bk-row" data-go="/realizacja/${esc(r.id)}"><span class="bk-d">${n ? `<b>${esc(n.date.split('-').reverse().slice(0, 2).join('.'))}</b><span>${esc(n.start)}–${esc(n.end)}</span>` : '<b>—</b>'}</span>
-    <span class="bk-m"><span class="nm">${esc(r.title)}</span><span class="muted">${esc(r.kindLabel)} · ${esc(r.requesterName)}${r.assignees.length ? ' · obsada: ' + esc(r.assignees.map(a => a.name).join(', ')) : ''}</span><span class="badges">${reaBadges(r)}</span></span>${reaPill(r.status)}</button>`;
+    <span class="bk-m"><span class="nm">${esc(r.title)}</span><span class="muted">${esc(r.kindLabel)} · ${esc(r.requesterName)}${r.assignees.length ? ' · obsada: ' + esc(r.assignees.map(a => a.name).join(', ')) : ''}</span><span class="badges">${reaBadges(r)}</span>${axis}</span>${reaPill(r.status)}</button>`;
 }
 
 // ---------- kalendarz studia ----------
@@ -2301,8 +2352,23 @@ async function viewRea(id) {
 
 function editedTerm(p, t) { return Object.assign({ teardownMin: t.teardownMin, travelMin: t.travelMin }, t, RCUR.edits[t.id] || {}); }
 
+// Przerysowanie strony nie może gubić tego, co ktoś właśnie wpisuje (komentarz, powód, propozycja, zgoda na nadgodziny).
+function captureReaUi() {
+  const v = sel => { const n = $(sel); return n ? (n.type === 'checkbox' ? n.checked : n.value) : undefined; };
+  return { propOpen: $('#apPropBox') && !$('#apPropBox').hidden, propText: v('#apPropIn'), noOpen: $('#apNoBox') && !$('#apNoBox').hidden, noText: v('#apNoIn'),
+    over: v('#apOver'), staff: v('#apStaff'), comment: v('#rcIn') };
+}
+function restoreReaUi(ui) {
+  if (!ui) return;
+  const set = (sel, val) => { const n = $(sel); if (n && val !== undefined && val !== null) { if (n.type === 'checkbox') n.checked = !!val; else n.value = val; } };
+  if (ui.propOpen && $('#apPropBox')) { $('#apPropBox').hidden = false; $('#apPropOpen').hidden = true; }
+  if (ui.noOpen && $('#apNoBox')) { $('#apNoBox').hidden = false; $('#apNoOpen').hidden = true; }
+  set('#apPropIn', ui.propText); set('#apNoIn', ui.noText); set('#apOver', ui.over); set('#apStaff', ui.staff); set('#rcIn', ui.comment);
+}
+
 function drawRea(p) {
-  if (!RCUR || RCUR.id !== p.id) RCUR = { id: p.id, edits: {}, sel: {} };
+  const keepUi = RCUR && RCUR.id === p.id && $('#rcIn') ? captureReaUi() : (RCUR && RCUR.id === p.id ? RCUR.ui : null);
+  if (!RCUR || RCUR.id !== p.id) RCUR = { id: p.id, edits: {}, sel: {}, ui: {} };
   if (p.legacyId && route !== '/realizacja/' + p.id) google.script.history.replace(null, null, '/realizacja/' + p.id);
   const appr = p.can.approve;
   p.terms.forEach(t => { if (t.canApprove && RCUR.sel[t.id] === undefined) RCUR.sel[t.id] = !t.conflict; });
@@ -2310,7 +2376,7 @@ function drawRea(p) {
   const calNotes = p.terms.filter(t => t.calChanged);
   const termsHtml = p.terms.map(t => {
     const e = editedTerm(p, t), editable = appr && t.canApprove;
-    const st = editable && DAYCACHE[e.date] ? termState(e, p.id) : null;
+    const st = editable && DAYCACHE[e.date] ? termState(e, t.id) : null;
     // Przy edycji akceptującego stan liczony na żywo z kalendarza; poza tym — zapisany przy zgłoszeniu.
     const out = st ? sr_outOfHours(e, hs()) : t.outOfHours, conf = st ? !!st.conflict : !!(t.conflict && t.status === TS().pending);
     const flags = [out ? '<span class="badge-s warn">poza godzinami</span>' : '', conf ? `<span class="badge-s bad" title="${esc(st ? st.txt : t.conflict)}">kolizja${st ? ': ' + esc(st.txt.replace(/^Nachodzi na /, '')) : t.conflict ? ': ' + esc(t.conflict) : ''}</span>` : '',
@@ -2324,7 +2390,7 @@ function drawRea(p) {
         ${t.status === TS().proposal && t.proposed ? `<div class="prop-l">proponowany: <b>${esc(termLine(t.proposed))}</b></div>` : ''}
         ${t.calChanged ? `<div class="dim" style="font-size:12px">${esc(t.calChanged)}</div>` : ''}
         ${t.decisionNote && t.status === TS().rejected ? `<div class="dim" style="font-size:12px">powód: ${esc(t.decisionNote)}</div>` : ''}
-        ${editable ? `<div class="tm-axis">${dayAxis(e.date, e, { mini: true, skip: p.id })}</div>` : ''}
+        ${editable ? `<div class="tm-axis">${dayAxis(e.date, e, { mini: true, skip: t.id })}</div>` : ''}
       </span>
       <span class="tm-s">${reaPill(t.status)}<span class="badges">${flags}</span>${t.canCancel ? `<button class="btn-t btn tm-x" data-cancel="${esc(t.id)}">anuluj</button>` : ''}</span>
     </div>`;
@@ -2332,7 +2398,8 @@ function drawRea(p) {
   const kv = [['Rodzaj', p.kindLabel], ['Zgłasza', `${esc(p.requesterName)} · <a href="mailto:${esc(p.requesterEmail)}">${esc(p.requesterEmail)}</a>`], ['Brand', esc(p.brand)], ['Format', esc(p.format)],
     ['Zakres', esc(p.scope.join(', '))], ['Liczba osób', esc(p.guests)], ['Platforma', esc(p.platform)], ['Link', p.meetingLink ? (/^https?:/.test(p.meetingLink) ? `<a href="${esc(p.meetingLink)}" target="_blank" rel="noopener">${esc(p.meetingLink)}</a>` : esc(p.meetingLink)) : ''],
     ['Lokalizacja', esc(p.location)], ['Parking', esc(p.parking)], ['Zgoda Zarządu TC', esc(p.boardConsent) + (p.boardConsent === 'Nie' ? ' <span class="badge-s bad">brak zgody</span>' : '')],
-    ['Forma oddania', esc(p.delivery)], ['Seria', p.seriesRule && p.terms.length > 1 ? esc(sr_describe(p.seriesRule)) : ''], ['Uwagi', esc(p.notes)], ['Uzasadnienie terminu', esc(p.conflictReason)], ['Zgłoszono', fmtTs(p.createdAt)]]
+    ['Forma oddania', esc(p.delivery)], ['Logo w tle', esc(p.logoBrand)],
+    ['Zlecenia montażowe', p.linkedMontage.map(id => `<a href="#" data-go="/projekt/${esc(id)}">${esc(id)}</a>`).join(', ')], ['Seria', p.seriesRule && p.terms.length > 1 ? esc(sr_describe(p.seriesRule)) : ''], ['Uwagi', esc(p.notes)], ['Uzasadnienie terminu', esc(p.conflictReason)], ['Zgłoszono', fmtTs(p.createdAt)]]
     .filter(x => x[1] && x[1] !== '' && x[1] !== 'undefined');
   const anyOut = p.terms.some(t => RCUR.sel[t.id] && t.canApprove && sr_outOfHours(editedTerm(p, t), hs()));
   const approveCard = appr ? `<div class="card"><div class="card-t">Decyzja</div>
@@ -2360,8 +2427,8 @@ function drawRea(p) {
   const banner = props.length && p.can.acceptProposal ? `<div class="card sec bk-prop"><div class="w5">Studio proponuje inny termin</div>${props.map(t => `<div style="margin-top:6px"><b>${esc(termLine(t.proposed))}</b> <span class="dim">(było: ${esc(termLine(t))})</span></div>`).join('')}
       ${props[0].decisionNote ? `<div class="rej-why" style="margin-top:8px">${esc(props[0].decisionNote)}</div>` : ''}
       <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap"><button class="btn btn-p" id="propOk">Przyjmuję termin</button><span class="hint" style="margin:auto 0">Nie pasuje? Napisz w komentarzu poniżej.</span></div></div>`
-    : p.status === RS().ok ? `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div><div class="w5">Zaakceptowane</div><div class="muted" style="font-size:13px">Terminy są w kalendarzu studia, zaproszenia poszły mailem.</div></div></div>`
-    : p.status === RS().done ? `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div><div class="w5">Zrealizowane</div><div class="muted" style="font-size:13px">Wszystkie terminy minęły.${p.delivery === 'Zmontowany materiał' ? ' Czas na zlecenie montażowe.' : ''}</div></div></div>`
+    : p.status === RS().ok ? `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div style="flex:1"><div class="w5">Zaakceptowane</div><div class="muted" style="font-size:13px">${p.holdOpen ? 'Zlecenie zostaje otwarte mimo minionych terminów.' : 'Terminy są w kalendarzu studia, zaproszenia poszły mailem.'}</div></div>${p.can.reopen ? '<button class="btn btn-g btn-sm" id="reopen">Oznacz jako zrealizowane</button>' : ''}</div>`
+    : p.status === RS().done ? `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div style="flex:1"><div class="w5">Zrealizowane</div><div class="muted" style="font-size:13px">Wszystkie terminy minęły.${p.delivery === 'Zmontowany materiał' ? ' Czas na zlecenie montażowe.' : ''}</div></div>${p.can.reopen ? '<button class="btn btn-g btn-sm" id="reopen">Cofnij</button>' : ''}</div>`
     : p.status === RS().pending ? `<div class="card sec bk-wait"><div class="w5">Czeka na akceptację studia</div><div class="muted" style="font-size:13px">Godziny realizacji potwierdzamy indywidualnie. Slot jest wstępnie zablokowany w portalu.</div></div>`
     : p.status === RS().rejected ? `<div class="card sec rej-banner"><span class="rej-dot">${ICON.x}</span><div><div class="w5">Odrzucone</div><div class="rej-why">${esc((p.terms.find(t => t.decisionNote) || {}).decisionNote || '')}</div></div></div>`
     : p.status === RS().cancelled ? `<div class="card sec"><div class="w5">Anulowane</div></div>` : '';
@@ -2375,6 +2442,7 @@ function drawRea(p) {
       <div class="card sec"><div class="card-t">Opis</div><div class="brief">${esc(p.description)}</div></div>
       <div class="card sec"><dl class="kv">${kv.map(([a, b]) => `<dt>${esc(a)}</dt><dd>${b}</dd>`).join('')}</dl>
         ${p.tech.length ? `<div class="card-t" style="margin-top:18px">Wymagania techniczne</div><ul class="tech">${p.tech.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${p.agendaText ? `<div class="card-t" style="margin-top:18px">Agenda</div><div class="brief" style="font-size:14px">${esc(p.agendaText)}</div>` : ''}
         ${p.agendaFile ? `<div class="card-t" style="margin-top:18px">Agenda / scenariusz</div><a class="dl" href="${DRIVE_FILE}${encodeURIComponent(p.agendaFile.id)}/view" target="_blank" rel="noopener"><span class="muted">${ICON.doc}</span><span class="nm">${esc(p.agendaFile.name)}</span><span class="dim" style="font-size:12px">${fmtSize(p.agendaFile.size)}</span>${ICON.link}</a>` : ''}</div>
       <div class="card sec"><div class="card-t">Komentarze <span class="dim">· widzi studio i zgłaszający</span></div>
         ${p.comments.map(c => `<div class="cm${c.studio ? ' cm-st' : ''}"><div class="ch"><span>${esc(c.authorName)}${c.studio ? ' <span class="cm-tag">Studio</span>' : ''}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy. Tu ustalacie szczegóły realizacji.</p>'}
@@ -2384,14 +2452,16 @@ function drawRea(p) {
       <div class="card"><div class="card-t">Historia</div><div class="timeline">${p.history.slice().reverse().map(h => `<div class="tl"><i></i><div><div>${esc(h.action)}${h.details ? ' — <span class="muted">' + esc(h.details) + '</span>' : ''}</div><div class="tt">${fmtTs(h.ts)} · ${esc(h.actor)}</div></div></div>`).join('')}</div></div>
     </aside></div></section>`;
   bindReaPage(p);
+  restoreReaUi(keepUi);
   if (appr) { const ds = p.terms.filter(t => t.canApprove).map(t => editedTerm(p, t).date); if (ds.some(d => !DAYCACHE[d])) ensureDays(ds).then(() => { if (route.startsWith('/realizacja/') || route.startsWith('/rezerwacja/')) drawRea(p); }).catch(() => {}); }
 }
 
 function bindReaPage(p) {
   const act = async (btn, fn, ok) => {
-    const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
-    try { const np = await fn(); if (ok) toast(ok, 'ok'); dropDays(); RCUR = { id: np.id, edits: {}, sel: {} }; drawRea(np); refreshReaCount(); }
-    catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.innerHTML = old; }
+    const sel = btn.tagName === 'SELECT', old = btn.innerHTML;
+    btn.disabled = true; if (!sel) btn.innerHTML = '<span class="spin"></span>';
+    try { const np = await fn(); if (ok) toast(ok, 'ok'); dropDays(); RCUR = { id: np.id, edits: {}, sel: {}, ui: {} }; drawRea(np); refreshReaCount(); }
+    catch (e) { toast(e.message, 'bad'); btn.disabled = false; if (!sel) btn.innerHTML = old; else drawRea(p); }
   };
   const selected = () => p.terms.filter(t => t.canApprove && RCUR.sel[t.id]);
   const items = () => selected().map(t => { const e = editedTerm(p, t); return { id: t.id, date: e.date, ready: e.ready, start: e.start, end: e.end }; });
@@ -2427,7 +2497,8 @@ function bindReaPage(p) {
   $('#propOk') && ($('#propOk').onclick = e => act(e.currentTarget, () => api('acceptProposal', p.id), 'Termin przyjęty — jest w kalendarzu studia.'));
   $('#stClaim') && ($('#stClaim').onclick = e => act(e.currentTarget, () => api('claimRealization', p.id), 'Jesteś w obsadzie — dopisaliśmy Cię do wydarzeń.'));
   $('#stRel') && ($('#stRel').onclick = e => act(e.currentTarget, () => api('releaseRealization', p.id), 'Zrezygnowano z realizacji.'));
-  $('#stNeed') && ($('#stNeed').onchange = e => act(e.currentTarget, () => api('setStaffNeeded', p.id, Number(e.currentTarget.value)), 'Zapisano obsadę.'));
+  $('#stNeed') && ($('#stNeed').onchange = e => { const n = Number(e.currentTarget.value); act(e.currentTarget, () => api('setStaffNeeded', p.id, n), 'Zapisano obsadę.'); });
+  $('#reopen') && ($('#reopen').onclick = e => act(e.currentTarget, () => api('setRealizationOpen', p.id, !p.holdOpen), p.holdOpen ? 'Oznaczono jako zrealizowane.' : 'Cofnięto „Zrealizowane”.'));
   $('#rcAdd') && ($('#rcAdd').onclick = e => { const t = $('#rcIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, ''), 'Komentarz dodany.'); });
   const twoClick = (btn, label, hintSel, hint, fn) => {
     if (!btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = label; btn.classList.add('btn-rej'); if (hintSel && $(hintSel)) $(hintSel).textContent = hint; return; }
@@ -2437,7 +2508,7 @@ function bindReaPage(p) {
   $('#cAll') && ($('#cAll').onclick = e => twoClick(e.currentTarget, 'Kliknij ponownie, żeby anulować', '#cAllHint', 'Terminy znikną z kalendarza studia, a druga strona dostanie maila.', () => act(e.currentTarget, () => api('cancelTerms', p.id, 'all'), 'Anulowano.')));
   $('#mkMontage') && ($('#mkMontage').onclick = () => {
     const cur = store.get('stz_draft', null) || {};
-    store.set('stz_draft', Object.assign({}, cur, { title: cur.title || p.title, description: (cur.description ? cur.description + '\n\n' : '') + 'Materiał z realizacji ' + p.id + ' („' + p.title + '”, ' + termLine(p.terms.find(t => t.status === TS().ok) || p.terms[0]) + '). Link: ' + (B.appUrl || '') + '?r=' + p.id, brand: cur.brand || p.brand || '' }));
+    store.set('stz_draft', Object.assign({}, cur, { linkedRea: p.id, title: cur.title || p.title, description: (cur.description ? cur.description + '\n\n' : '') + 'Materiał z realizacji ' + p.id + ' („' + p.title + '”, ' + termLine(p.terms.find(t => t.status === TS().ok) || p.terms[0]) + '). Link: ' + (B.appUrl || '') + '?r=' + p.id, brand: cur.brand || p.brand || '' }));
     store.set('stz_step', 0); if (typeof W !== 'undefined') { W.d = null; W.step = 0; }
     nav.push('/nowe');
   });

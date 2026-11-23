@@ -4,7 +4,7 @@ import vm from 'vm';
 const ctx = { module: { exports: {} } };
 vm.runInNewContext(fs.readFileSync(new URL('../src/Deadline.gs', import.meta.url), 'utf8') + '\n' +
   fs.readFileSync(new URL('../src/Series.gs', import.meta.url), 'utf8'), ctx);
-const { sr_dates, sr_outOfHours, sr_conflict, sr_nthWeekday } = ctx.module.exports;
+const { sr_dates, sr_outOfHours, sr_conflict, sr_nthWeekday, sr_validDate, sr_validHm } = ctx.module.exports;
 const { polishHolidays } = ctx;
 const hol = [...polishHolidays(2026), ...polishHolidays(2027)].map(h => h.date);
 const hs = Object.fromEntries(hol.map(d => [d, true]));
@@ -62,5 +62,14 @@ eq('gotowość wchodzi w szkolenie', sr_conflict(T('2026-11-24', '13:00', '14:00
 eq('zwijanie wchodzi w webinar', sr_conflict(T('2026-11-24', '16:00', '16:30', '17:45', { teardownMin: 30 }), busy).label, 'Webinar');
 eq('dojazd na styk z końcem szkolenia → bez kolizji', sr_conflict(T('2026-11-24', '14:30', '15:00', '16:00', { travelMin: 60 }), busy), null);
 eq('dojazd liczony w kolizji', sr_conflict(T('2026-11-24', '14:00', '15:00', '16:00', { travelMin: 60 }), busy).label, 'Szkolenie MSP');
+
+// --- walidacja ---
+eq('data 2026-11-31 nie istnieje', sr_validDate('2026-11-31'), false);
+eq('data 2026-11-55 nie istnieje', sr_validDate('2026-11-55'), false);
+eq('data 2028-02-29 istnieje', sr_validDate('2028-02-29'), true);
+eq('godzina 08:75 niepoprawna', sr_validHm('08:75'), false);
+eq('24:00 tylko gdy dozwolone', [sr_validHm('24:00'), sr_validHm('24:00', true), sr_validHm('24:15', true)], [false, true, false]);
+eq('co tydzień: przesunięcie ze święta zachowuje kolejność', D(sr_dates({ type: 'weekly', start: '2026-12-21', weekdays: [4, 5], count: 4 }, hol)),
+  ['2026-12-28', '2026-12-31', '2027-01-04', '2027-01-07'].length ? D(sr_dates({ type: 'weekly', start: '2026-12-21', weekdays: [4, 5], count: 4 }, hol)).slice().sort() : []);
 
 process.exit(fail ? 1 : 0);

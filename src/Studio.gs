@@ -106,19 +106,22 @@ function normTerm_(t) {
 }
 function termEnd_(t) { return toDate_(t.date, sr_block(t).to); }
 
-// Status zlecenia wyliczany z terminów.
-function reaStatus_(terms) {
-  var has = function (s) { return terms.some(function (t) { return t.status === s; }); };
-  if (has(TERM.proposal)) return REA.proposal;
-  if (has(TERM.pending)) return REA.pending;
+// Status zlecenia wyliczany z terminów. Czekające terminy, które minęły bez decyzji, się nie liczą (dailyStudio je anuluje).
+// „Zrealizowane" od dnia po ostatnim zaakceptowanym terminie; zarządzający może to cofnąć (holdOpen).
+function reaStatus_(terms, holdOpen) {
+  var now = new Date(), today = ymd_(now);
+  var live = function (t) { return toDate_(t.date, sr_block(t).from) > now; };
+  var has = function (s, onlyLive) { return terms.some(function (t) { return t.status === s && (!onlyLive || live(t)); }); };
+  if (has(TERM.proposal, true)) return REA.proposal;
+  if (has(TERM.pending, true)) return REA.pending;
   if (has(TERM.ok)) {
-    var now = new Date();
-    return terms.filter(function (t) { return t.status === TERM.ok; }).every(function (t) { return termEnd_(t) < now; }) ? REA.done : REA.ok;
+    var allPast = terms.filter(function (t) { return t.status === TERM.ok; }).every(function (t) { return t.date < today; });
+    return allPast && !holdOpen ? REA.done : REA.ok;
   }
   return has(TERM.rejected) ? REA.rejected : REA.cancelled;
 }
 function refreshStatus_(r) {
-  var st = reaStatus_(termsOf_(r.id));
+  var st = reaStatus_(termsOf_(r.id), r.holdOpen === '1' || r.holdOpen === 1 || r.holdOpen === true);
   if (st !== r.status) update_('Realizacje', r._row, { status: st, updatedAt: nowIso_() });
   r.status = st;
   return st;
@@ -127,17 +130,21 @@ function refreshStatus_(r) {
 // --- zajętość ---
 
 // Zajętość dni z kalendarza + terminy czekające na akceptację / z propozycją (wstępnie zajęte, tylko w portalu).
-// Zwraca { 'YYYY-MM-DD': [{start, end, label, tentative, reaId}] }. skipReaId: pomiń własne terminy realizacji.
-function busyMap_(dates, u, skipReaId) {
+// Zwraca { 'YYYY-MM-DD': [{start, end, label, tentative, reaId, termId}] }.
+// opts.skipTerms: { termId: true } — pomiń te terminy (i ich wydarzenia), np. właśnie decydowane;
+// opts.realOnly: tylko wydarzenia z kalendarza — przy decyzji czekające zgłoszenia innych nie blokują (to jest kolejka, nie rezerwacja).
+function busyMap_(dates, u, opts) {
+  opts = opts || {};
+  var skip = opts.skipTerms || {};
   var out = {};
   dates.forEach(function (d) { out[d] = []; });
   if (!dates.length) return out;
   var sorted = dates.slice().sort();
   var showTitles = isStudio_(u) || canApproveAny_(u);
-  var ownEvents = {}, eventRea = {};
+  var ownEvents = {}, eventTerm = {};
   var terms = rows_('Terminy').map(normTerm_);
   terms.forEach(function (t) {
-    if (t.eventId) { eventRea[t.eventId] = t.realizationId; if (t.realizationId === skipReaId) ownEvents[t.eventId] = true; }
+    if (t.eventId) { eventTerm[t.eventId] = t; if (skip[t.id]) ownEvents[t.eventId] = true; }
   });
   var titles = {};
   if (showTitles) rows_('Realizacje').forEach(function (r) { titles[r.id] = r.title; });
@@ -151,21 +158,26 @@ function busyMap_(dates, u, skipReaId) {
       var id = e.getId();
       if (ownEvents[id]) return;
       var s = e.getStartTime(), en = e.getEndTime(), all = e.isAllDayEvent();
-      for (var d = ymd_(s); d <= rg[1] && d <= ymd_(new Date(en.getTime() - 1)); d = dl_addDays(d, 1)) {
+      var first = ymd_(s) < rg[0] ? rg[0] : ymd_(s);
+      for (var d = first; d <= rg[1] && d <= ymd_(new Date(en.getTime() - 1)); d = dl_addDays(d, 1)) {
         if (!out[d]) continue;
         var dayFrom = toDate_(d, 0), dayTo = toDate_(d, 1440);
         var from = all || s <= dayFrom ? '00:00' : hm_(s), to = all || en >= dayTo ? '24:00' : hm_(en);
-        out[d].push({ start: from, end: to, label: showTitles ? e.getTitle() : 'Zajęte', tentative: false, reaId: showTitles ? (eventRea[id] || '') : '' });
+        var et = eventTerm[id];
+        out[d].push({ start: from, end: to, label: showTitles ? e.getTitle() : 'Zajęte', tentative: false,
+          reaId: showTitles && et ? et.realizationId : '', termId: showTitles && et ? et.id : '' });
       }
     });
   });
-  terms.forEach(function (t) {
-    if ((t.status !== TERM.pending && t.status !== TERM.proposal) || t.realizationId === skipReaId) return;
+  var now = new Date();
+  if (!opts.realOnly) terms.forEach(function (t) {
+    if ((t.status !== TERM.pending && t.status !== TERM.proposal) || skip[t.id]) return;
     var x = t.status === TERM.proposal && t.proposed ? Object.assign({}, t, t.proposed) : t;
     if (!out[x.date]) return;
     var b = sr_block(x);
+    if (toDate_(x.date, b.from) <= now) return;  // minął bez decyzji — nie blokuje
     out[x.date].push({ start: sr_hm(b.from), end: sr_hm(b.to), label: showTitles ? (titles[t.realizationId] || t.realizationId) + ' (czeka na akceptację)' : 'Wstępnie zajęte',
-      tentative: true, reaId: showTitles ? t.realizationId : '' });
+      tentative: true, reaId: showTitles ? t.realizationId : '', termId: showTitles ? t.id : '' });
   });
   Object.keys(out).forEach(function (d) { out[d].sort(function (a, b) { return a.start.localeCompare(b.start); }); });
   return out;
@@ -173,17 +185,21 @@ function busyMap_(dates, u, skipReaId) {
 
 function checkDates_(dates, max) {
   if (!Array.isArray(dates) || !dates.length || dates.length > max) throw new Error('Nieprawidłowy zakres dat.');
-  dates.forEach(function (d) { if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) throw new Error('Nieprawidłowa data: ' + d); });
+  dates.forEach(function (d) { if (!sr_validDate(d)) throw new Error('Nieprawidłowa data: ' + d); });
+}
+
+function days_(dates, u) {
+  var hs = holSet_(), busy = busyMap_(dates, u, {});
+  var days = {};
+  dates.forEach(function (d) { days[d] = { workday: dl_isWorkday(d, hs), busy: busy[d] }; });
+  return days;
 }
 
 // Zajętość wybranych dni (kreator: oś dnia, pasek 5 dni, terminy serii).
 function studioDays(dates) {
   var u = me_();
   checkDates_(dates, 40);
-  var hs = holSet_(), busy = busyMap_(dates, u, '');
-  var days = {};
-  dates.forEach(function (d) { days[d] = { workday: dl_isWorkday(d, hs), busy: busy[d] }; });
-  return days;
+  return days_(dates, u);
 }
 
 // Widok kalendarza studia (tydzień / miesiąc).
@@ -191,9 +207,10 @@ function studioRange(from, n) {
   var u = me_();
   if (!isStudio_(u) && !canApproveAny_(u)) throw new Error('Kalendarz studia jest dostępny dla zespołu studia.');
   n = Math.min(42, Math.max(1, Number(n) || 7));
+  if (!sr_validDate(from)) throw new Error('Nieprawidłowa data.');
   var dates = [];
   for (var i = 0; i < n; i++) dates.push(dl_addDays(from, i));
-  return studioDays(dates);
+  return days_(dates, u);
 }
 
 // --- walidacja zlecenia ---
@@ -223,14 +240,15 @@ function validateRea_(p) {
   }
   if ((p.tech || []).some(function (x) { return REA_TECH.indexOf(x) < 0; })) err.push('wymagania techniczne');
   if (String(p.notes || '').length > 2000) err.push('uwagi (maks. 2000 znaków)');
-  if (String(p.meetingLink || '').length > 500) err.push('link do spotkania');
+  if (String(p.meetingLink || '').length > 500) err.push('link do spotkania (maks. 500 znaków)');
+  if (String(p.agendaText || '').length > 4000) err.push('agenda (maks. 4000 znaków)');
   if (err.length) throw new Error('Uzupełnij: ' + err.join(', ') + '.');
 }
 
 // Termin: format, kolejność godzin, mieści się w dobie, nie w przeszłości.
 function validateTerm_(t) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(t.date || '')) throw new Error('Nieprawidłowa data terminu.');
-  ['ready', 'start', 'end'].forEach(function (k) { if (!/^\d{2}:\d{2}$/.test(t[k] || '')) throw new Error('Nieprawidłowa godzina w terminie ' + t.date + '.'); });
+  if (!sr_validDate(t.date)) throw new Error('Nieprawidłowa data terminu: ' + t.date + '.');
+  ['ready', 'start', 'end'].forEach(function (k) { if (!sr_validHm(t[k], k === 'end')) throw new Error('Nieprawidłowa godzina w terminie ' + t.date + '.'); });
   var r = sr_min(t.ready), s = sr_min(t.start), e = sr_min(t.end);
   if (r > s) throw new Error(t.date + ': gotowość ekipy musi być przed startem wydarzenia.');
   if (e - s < 15) throw new Error(t.date + ': wydarzenie musi trwać co najmniej 15 minut.');
@@ -262,7 +280,7 @@ function createRealization(p) {
   var r;
   try {
     var hs = holSet_();
-    var busy = busyMap_(terms.map(function (t) { return t.date; }), u, '');
+    var busy = busyMap_(terms.map(function (t) { return t.date; }), u, {});
     var conflicts = 0;
     terms.forEach(function (t) {
       t.outOfHours = sr_outOfHours(t, hs);
@@ -276,6 +294,7 @@ function createRealization(p) {
     if (p.agendaFile && p.agendaFile.id) {
       var folder = reaFolder_(id);
       claimUpload_(p.agendaFile.id, u.email, folder);
+      try { DriveApp.getFileById(p.agendaFile.id).setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); } catch (e) {}
       agenda = { id: p.agendaFile.id, name: p.agendaFile.name, size: p.agendaFile.size, mime: p.agendaFile.mime };
     }
     r = {
@@ -286,8 +305,10 @@ function createRealization(p) {
       platform: p.kind === 'webinar' || p.kind === 'live' ? String(p.platform).trim().slice(0, 80) : '',
       meetingLink: String(p.meetingLink || '').trim(), location: isAway_(p) ? String(p.location).trim().slice(0, 300) : '',
       parking: isAway_(p) ? p.parking : '', boardConsent: p.boardConsent, tech: JSON.stringify(p.tech || []), delivery: p.delivery || '',
-      notes: String(p.notes || '').trim(), agendaFile: agenda ? JSON.stringify(agenda) : '', seriesRule: p.seriesRule ? JSON.stringify(p.seriesRule) : '',
-      conflictReason: conflicts ? String(p.conflictReason).trim().slice(0, 1000) : '', staffNeeded: 1, assignees: '[]', folderId: agenda ? reaFolder_(id).getId() : '', legacyId: ''
+      notes: String(p.notes || '').trim(), agendaFile: agenda ? JSON.stringify(agenda) : '', seriesRule: terms.length > 1 ? JSON.stringify(cleanRule_(p.seriesRule)) : '',
+      conflictReason: conflicts ? String(p.conflictReason).trim().slice(0, 1000) : '', staffNeeded: 1, assignees: '[]', folderId: agenda ? reaFolder_(id).getId() : '', legacyId: '',
+      holdOpen: '', linkedMontageId: '', agendaText: String(p.agendaText || '').trim().slice(0, 4000),
+      logoBrand: (p.tech || []).indexOf('Tło z logo brandu') >= 0 && BRANDS.indexOf(p.logoBrand) >= 0 ? p.logoBrand : ''
     };
     append_('Realizacje', r);
     terms.forEach(function (t, i) {
@@ -301,6 +322,18 @@ function createRealization(p) {
   sendReaSubmittedMail_(r, all);
   sendReaApprovalMail_(r, all);
   return getRealization(r.id);
+}
+
+// Reguła serii z klienta → tylko dozwolone pola i wartości (trafia do maili i na stronę zlecenia).
+function cleanRule_(r) {
+  r = r || {};
+  var type = ['weekly', 'biweekly', 'monthlyDay', 'monthlyNth', 'manual'].indexOf(r.type) >= 0 ? r.type : 'manual';
+  var int = function (v, lo, hi) { v = Math.round(Number(v)); return v >= lo && v <= hi ? v : null; };
+  var out = { type: type };
+  if (type === 'weekly' || type === 'biweekly') out.weekdays = (Array.isArray(r.weekdays) ? r.weekdays : []).map(function (w) { return int(w, 0, 6); }).filter(function (w) { return w !== null; });
+  if (type === 'monthlyDay') out.day = int(r.day, 1, 31) || 1;
+  if (type === 'monthlyNth') { out.nth = [1, 2, 3, 4, 5, -1].indexOf(Number(r.nth)) >= 0 ? Number(r.nth) : 1; out.weekday = int(r.weekday, 0, 6) || 1; }
+  return out;
 }
 
 function reaFolder_(id) {
@@ -332,6 +365,8 @@ function reaOut_(r, terms, u, full) {
   out.description = r.description; out.format = r.format; out.scope = json_(r.scope, []); out.guests = r.guests; out.platform = r.platform;
   out.meetingLink = r.meetingLink; out.location = r.location; out.parking = r.parking; out.tech = json_(r.tech, []); out.delivery = r.delivery;
   out.notes = r.notes; out.agendaFile = json_(r.agendaFile, null); out.seriesRule = json_(r.seriesRule, null); out.conflictReason = r.conflictReason;
+  out.agendaText = r.agendaText || ''; out.logoBrand = r.logoBrand || ''; out.holdOpen = String(r.holdOpen) === '1';
+  out.linkedMontage = String(r.linkedMontageId || '').split(',').filter(String);
   out.terms = terms.map(function (t) {
     var future = toDate_(t.date, sr_block(t).from) > now;
     return { id: t.id, n: t.n, date: t.date, ready: t.ready, start: t.start, end: t.end, teardownMin: t.teardownMin, travelMin: t.travelMin,
@@ -340,9 +375,10 @@ function reaOut_(r, terms, u, full) {
       canApprove: (t.status === TERM.pending || t.status === TERM.proposal) && future && canApproveTerm_(u, t),
       canCancel: future && (t.status === TERM.pending || t.status === TERM.proposal || t.status === TERM.ok) && (r.requesterEmail === u.email || studio || canAny) };
   });
-  out.comments = rows_('Komentarze').filter(function (c) { return c.projectId === r.id; })
-    .map(function (c) { return { ts: c.ts, authorName: c.authorName, text: c.text, studio: !!findAccess_(c.authorEmail) && isStudio_({ role: String(findAccess_(c.authorEmail).role) }) }; });
-  out.history = rows_('Historia').filter(function (h) { return h.projectId === r.id && (studio || canAny || h.action !== 'Mail'); })
+  var ids = [r.id].concat(r.legacyId ? [r.legacyId] : []);
+  out.comments = rows_('Komentarze').filter(function (c) { return ids.indexOf(c.projectId) >= 0; })
+    .map(function (c) { return { ts: c.ts, authorName: c.authorName, text: c.text, studio: c.authorEmail !== r.requesterEmail && isStudioSide_(c.authorEmail) }; });
+  out.history = rows_('Historia').filter(function (h) { return ids.indexOf(h.projectId) >= 0 && (studio || canAny || h.action !== 'Mail'); })
     .map(function (h) { return { ts: h.ts, actor: h.actor, action: h.action, details: h.details }; });
   var mine = assignees.some(function (a) { return a.email === u.email; });
   var live = r.status === REA.pending || r.status === REA.ok || r.status === REA.proposal;
@@ -353,6 +389,7 @@ function reaOut_(r, terms, u, full) {
     claim: studio && live && !mine && assignees.length < out.staffNeeded,
     release: studio && mine && live,
     staff: canAny && live,
+    reopen: isManager_(u) && (r.status === REA.done || (r.status === REA.ok && String(r.holdOpen) === '1')),
     montage: (studio || r.requesterEmail === u.email) && r.status !== REA.rejected && r.status !== REA.cancelled
   };
   return out;
@@ -398,7 +435,8 @@ function eventDesc_(r, t) {
   if (t.teardownMin) lines.push('Zwijanie sprzętu: ' + t.teardownMin + ' min');
   lines.push('');
   var tech = json_(r.tech, []);
-  if (tech.length) lines.push('Wymagania techniczne:', tech.map(function (x) { return '• ' + x; }).join('\n'), '');
+  if (tech.length) lines.push('Wymagania techniczne:', tech.map(function (x) { return '• ' + x + (x === 'Tło z logo brandu' && r.logoBrand ? ': ' + r.logoBrand : ''); }).join('\n'), '');
+  if (r.agendaText) lines.push('Agenda:', r.agendaText, '');
   [['Format', r.format], ['Zakres', json_(r.scope, []).join(', ')], ['Liczba osób', r.guests], ['Platforma', r.platform], ['Link', r.meetingLink],
     ['Parking', r.parking], ['Forma oddania', r.delivery], ['Zgoda Zarządu TC', r.boardConsent], ['Brand', r.brand],
     ['Zgłasza', r.requesterName + ' (' + r.requesterEmail + ')'], ['Uwagi', r.notes]]
@@ -419,9 +457,10 @@ function createTermEvent_(r, t) {
   return ev.getId();
 }
 
+// true = wydarzenia już nie ma (usunięte albo nie istniało); false = błąd kalendarza, spróbuj później.
 function deleteTermEvent_(t) {
-  if (!t.eventId) return;
-  try { var ev = studioCal_().getEventById(t.eventId); if (ev) ev.deleteEvent(); } catch (e) {}
+  if (!t.eventId) return true;
+  try { var ev = studioCal_().getEventById(t.eventId); if (ev) ev.deleteEvent(); return true; } catch (e) { return false; }
 }
 
 // Dopisuje / usuwa gościa we wszystkich przyszłych wydarzeniach realizacji (po zmianie obsady).
@@ -446,19 +485,59 @@ function reaForDecision_(id, u) {
   return r;
 }
 
+function withLock_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try { return fn(); } finally { lock.releaseLock(); }
+}
+
+// Unikalne pozycje po id (ten sam termin dwa razy = dwa wydarzenia w kalendarzu).
+function uniqItems_(items) {
+  var seen = {};
+  return (items || []).filter(function (it) { if (!it || seen[it.id]) return false; seen[it.id] = true; return true; });
+}
+
+// Wspólne dla akceptacji i przyjęcia propozycji: kolizje sprawdzane z prawdziwymi wydarzeniami (także innymi terminami
+// tej samej realizacji) i między decydowanymi terminami; wydarzenie usuwane, jeśli zapis w arkuszu się nie uda.
+function commitTerms_(r, picked, u, extraPatch) {
+  var skip = {};
+  picked.forEach(function (x) { skip[x.old.id] = true; });
+  var busy = busyMap_(picked.map(function (x) { return x.t.date; }), u, { skipTerms: skip, realOnly: true });
+  picked.forEach(function (x) {
+    var c = sr_conflict(x.t, busy[x.t.date]);
+    if (c) throw new Error(x.t.date + ': termin nachodzi na ' + c.start + '–' + c.end + ' (' + c.label + '). Skoryguj godziny albo zaproponuj inny termin.');
+    var b = sr_block(x.t);
+    busy[x.t.date].push({ start: sr_hm(b.from), end: sr_hm(b.to), label: r.title + ' (inny termin tej realizacji)' });
+  });
+  var done = [], failed = [];
+  picked.forEach(function (x) {
+    var evId = '';
+    try {
+      evId = createTermEvent_(r, x.t);
+      var changed = ['date', 'ready', 'start', 'end'].some(function (k) { return x.t[k] !== x.old[k]; });
+      update_('Terminy', x.old._row, Object.assign({ date: x.t.date, ready: x.t.ready, start: x.t.start, end: x.t.end, status: TERM.ok, eventId: evId,
+        outOfHours: x.t.outOfHours ? '1' : '', conflict: '', proposed: '',
+        before: changed ? JSON.stringify({ date: x.old.date, ready: x.old.ready, start: x.old.start, end: x.old.end }) : '' }, extraPatch(x)));
+      done.push(Object.assign({}, x.t, { before: changed ? x.old : null }));
+    } catch (e) {
+      if (evId) deleteTermEvent_({ eventId: evId });
+      failed.push(x.t.date + ': ' + e.message);
+    }
+  });
+  return { done: done, failed: failed };
+}
+
 // Akceptacja wybranych terminów, opcjonalnie z korektą godzin. items: [{id, date, ready, start, end}].
 function approveTerms(id, items, opts) {
   var u = me_();
   opts = opts || {};
   if (!canApproveAny_(u)) throw new Error('Akceptuje zarządzający studiem.');
-  if (!(items || []).length) throw new Error('Zaznacz terminy do akceptacji.');
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  var r, done = [];
-  try {
+  items = uniqItems_(items);
+  if (!items.length) throw new Error('Zaznacz terminy do akceptacji.');
+  var r, res;
+  withLock_(function () {
     r = reaForDecision_(id, u);
-    if (opts.staffNeeded) update_('Realizacje', r._row, { staffNeeded: Math.max(1, Math.min(4, Number(opts.staffNeeded) || 1)) }), r.staffNeeded = opts.staffNeeded;
-    var terms = termsOf_(r.id), hs = holSet_();
+    var terms = termsOf_(r.id), hs = holSet_(), now = new Date();
     var picked = items.map(function (it) {
       var t = terms.filter(function (x) { return x.id === it.id; })[0];
       if (!t || (t.status !== TERM.pending && t.status !== TERM.proposal)) throw new Error('Termin ' + it.id + ' nie czeka na akceptację.');
@@ -469,28 +548,18 @@ function approveTerms(id, items, opts) {
       if (n.outOfHours && !opts.overtime) throw new Error('Zaznacz „Zgoda na pracę poza godzinami” — część terminów wypada poza ' + SR_WORK[0] + ':00–' + SR_WORK[1] + ':00.');
       return { old: t, t: n };
     });
-    var busy = busyMap_(picked.map(function (x) { return x.t.date; }), u, r.id);
-    picked.forEach(function (x) {
-      var c = sr_conflict(x.t, busy[x.t.date]);
-      if (c) throw new Error(x.t.date + ': termin nachodzi na ' + c.start + '–' + c.end + ' (' + c.label + '). Skoryguj godziny albo zaproponuj inny termin.');
-      // Terminy z tej samej akceptacji też nie mogą na siebie nachodzić.
-      var b = sr_block(x.t);
-      busy[x.t.date].push({ start: sr_hm(b.from), end: sr_hm(b.to), label: r.title });
+    if (opts.staffNeeded) {
+      var need = Math.max(1, Math.min(4, Number(opts.staffNeeded) || 1));
+      if (json_(r.assignees, []).length <= need) { update_('Realizacje', r._row, { staffNeeded: need }); r.staffNeeded = need; }
+    }
+    res = commitTerms_(r, picked, u, function (x) {
+      return { decidedBy: u.name, decidedAt: nowIso_(), decisionNote: x.t.outOfHours ? 'zgoda na pracę poza godzinami' : '' };
     });
-    var rFresh = findRea_(r.id);
-    picked.forEach(function (x) {
-      var changed = ['date', 'ready', 'start', 'end'].some(function (k) { return x.t[k] !== x.old[k]; });
-      var evId = createTermEvent_(rFresh, x.t);
-      var patch = { date: x.t.date, ready: x.t.ready, start: x.t.start, end: x.t.end, status: TERM.ok, eventId: evId, outOfHours: x.t.outOfHours ? '1' : '',
-        conflict: '', proposed: '', before: changed ? JSON.stringify({ date: x.old.date, ready: x.old.ready, start: x.old.start, end: x.old.end }) : '',
-        decidedBy: u.name, decidedAt: nowIso_(), decisionNote: x.t.outOfHours ? 'zgoda na pracę poza godzinami' : '' };
-      update_('Terminy', x.old._row, patch);
-      done.push(Object.assign({}, x.t, { before: changed ? x.old : null }));
-    });
-    log_(r.id, u.email, 'Akceptacja', done.length + ' termin(y)' + (opts.overtime ? ' · zgoda na pracę poza godzinami' : ''));
+    if (res.done.length) log_(r.id, u.email, 'Akceptacja', res.done.length + ' termin(y)' + (opts.overtime ? ' · zgoda na pracę poza godzinami' : ''));
     refreshStatus_(r);
-  } finally { lock.releaseLock(); }
-  sendReaApprovedMail_(findRea_(r.id), done, u);
+  });
+  if (res.done.length) sendReaApprovedMail_(findRea_(r.id), res.done, u);
+  if (res.failed.length) throw new Error('Nie udało się zaakceptować: ' + res.failed.join('; ') + (res.done.length ? ' (pozostałe zaakceptowane)' : ''));
   return getRealization(r.id);
 }
 
@@ -498,22 +567,29 @@ function approveTerms(id, items, opts) {
 function proposeTerms(id, items, comment) {
   var u = me_();
   if (!canApproveAny_(u)) throw new Error('Termin proponuje zarządzający studiem.');
-  if (!(items || []).length) throw new Error('Zaznacz terminy, dla których proponujesz zmianę.');
+  items = uniqItems_(items);
+  if (!items.length) throw new Error('Zaznacz terminy, dla których proponujesz zmianę.');
   comment = String(comment || '').trim().slice(0, 1000);
-  var r = reaForDecision_(id, u), terms = termsOf_(r.id), hs = holSet_(), list = [];
-  items.forEach(function (it) {
-    var t = terms.filter(function (x) { return x.id === it.id; })[0];
-    if (!t || (t.status !== TERM.pending && t.status !== TERM.proposal)) throw new Error('Termin ' + it.id + ' nie czeka na akceptację.');
-    var n = Object.assign({}, t, { date: String(it.date), ready: String(it.ready), start: String(it.start), end: String(it.end) });
-    validateTerm_(n);
-    if (sr_outOfHours(n, hs) && !isManager_(u)) throw new Error(n.date + ': termin poza godzinami pracy proponuje zarządzający studiem.');
-    var prop = { date: n.date, ready: n.ready, start: n.start, end: n.end };
-    update_('Terminy', t._row, { status: TERM.proposal, proposed: JSON.stringify(prop), decidedBy: u.name, decidedAt: nowIso_(), decisionNote: comment });
-    list.push({ old: t, prop: prop });
+  var r, list = [];
+  withLock_(function () {
+    r = reaForDecision_(id, u);
+    var terms = termsOf_(r.id), hs = holSet_();
+    var picked = items.map(function (it) {
+      var t = terms.filter(function (x) { return x.id === it.id; })[0];
+      if (!t || (t.status !== TERM.pending && t.status !== TERM.proposal)) throw new Error('Termin ' + it.id + ' nie czeka na akceptację.');
+      var n = Object.assign({}, t, { date: String(it.date), ready: String(it.ready), start: String(it.start), end: String(it.end) });
+      validateTerm_(n);
+      if (sr_outOfHours(n, hs) && !isManager_(u)) throw new Error(n.date + ': termin poza godzinami pracy proponuje zarządzający studiem.');
+      return { t: t, prop: { date: n.date, ready: n.ready, start: n.start, end: n.end } };
+    });
+    picked.forEach(function (x) {
+      update_('Terminy', x.t._row, { status: TERM.proposal, proposed: JSON.stringify(x.prop), decidedBy: u.name, decidedAt: nowIso_(), decisionNote: comment });
+      list.push({ old: x.t, prop: x.prop });
+    });
+    if (comment) append_('Komentarze', { ts: nowIso_(), projectId: r.id, authorEmail: u.email, authorName: u.name, text: 'Propozycja terminu: ' + comment });
+    log_(r.id, u.email, 'Propozycja terminu', list.map(function (x) { return x.prop.date + ' ' + x.prop.start + '–' + x.prop.end; }).join(', '));
+    refreshStatus_(r);
   });
-  if (comment) append_('Komentarze', { ts: nowIso_(), projectId: r.id, authorEmail: u.email, authorName: u.name, text: 'Propozycja terminu: ' + comment });
-  log_(r.id, u.email, 'Propozycja terminu', list.map(function (x) { return x.prop.date + ' ' + x.prop.start + '–' + x.prop.end; }).join(', '));
-  refreshStatus_(r);
   sendReaProposalMail_(r, list, comment, u);
   return getRealization(r.id);
 }
@@ -521,31 +597,25 @@ function proposeTerms(id, items, comment) {
 // Zgłaszający przyjmuje zaproponowany termin → akceptacja z wpisem do kalendarza.
 function acceptProposal(id) {
   var u = me_();
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
-  var r, done = [];
-  try {
+  var r, res;
+  withLock_(function () {
     r = findRea_(id);
     if (!r || r.requesterEmail !== u.email) throw new Error('Propozycję przyjmuje osoba zgłaszająca.');
+    var now = new Date();
     var terms = termsOf_(r.id).filter(function (t) { return t.status === TERM.proposal && t.proposed; });
     if (!terms.length) throw new Error('Brak propozycji do przyjęcia.');
     var hs = holSet_();
     var picked = terms.map(function (t) { var n = Object.assign({}, t, t.proposed); validateTerm_(n); n.outOfHours = sr_outOfHours(n, hs); return { old: t, t: n }; });
-    var busy = busyMap_(picked.map(function (x) { return x.t.date; }), u, r.id);
-    picked.forEach(function (x) {
-      var c = sr_conflict(x.t, busy[x.t.date]);
-      if (c) throw new Error(x.t.date + ': zaproponowany termin został w międzyczasie zajęty. Napisz do studia w komentarzu.');
-    });
-    picked.forEach(function (x) {
-      var evId = createTermEvent_(r, x.t);
-      update_('Terminy', x.old._row, { date: x.t.date, ready: x.t.ready, start: x.t.start, end: x.t.end, status: TERM.ok, eventId: evId,
-        outOfHours: x.t.outOfHours ? '1' : '', conflict: '', proposed: '', before: JSON.stringify({ date: x.old.date, ready: x.old.ready, start: x.old.start, end: x.old.end }) });
-      done.push(Object.assign({}, x.t, { before: x.old }));
-    });
-    log_(r.id, u.email, 'Przyjęcie terminu', done.length + ' termin(y)');
+    try {
+      res = commitTerms_(r, picked, u, function () { return {}; });
+    } catch (e) {
+      throw new Error(String(e.message).replace('Skoryguj godziny albo zaproponuj inny termin.', 'Zaproponowany termin został w międzyczasie zajęty — napisz do studia w komentarzu.'));
+    }
+    if (res.done.length) log_(r.id, u.email, 'Przyjęcie terminu', res.done.length + ' termin(y)');
     refreshStatus_(r);
-  } finally { lock.releaseLock(); }
-  sendReaProposalAcceptedMail_(r, done, u);
+  });
+  if (res.done.length) sendReaProposalAcceptedMail_(r, res.done, u);
+  if (res.failed.length) throw new Error('Nie udało się przyjąć: ' + res.failed.join('; '));
   return getRealization(r.id);
 }
 
@@ -554,16 +624,20 @@ function rejectTerms(id, termIds, reason) {
   if (!canApproveAny_(u)) throw new Error('Odrzuca zarządzający studiem.');
   reason = String(reason || '').trim().slice(0, 2000);
   if (reason.length < 10) throw new Error('Uzasadnij odrzucenie (min. 10 znaków).');
-  var r = reaForDecision_(id, u), list = [];
-  termsOf_(r.id).forEach(function (t) {
-    if (termIds.indexOf(t.id) < 0) return;
-    if (t.status !== TERM.pending && t.status !== TERM.proposal) throw new Error('Termin ' + t.date + ' nie czeka na akceptację.');
-    update_('Terminy', t._row, { status: TERM.rejected, proposed: '', decidedBy: u.name, decidedAt: nowIso_(), decisionNote: reason });
-    list.push(t);
+  termIds = Array.isArray(termIds) ? termIds : [];
+  var r, list = [];
+  withLock_(function () {
+    r = reaForDecision_(id, u);
+    termsOf_(r.id).forEach(function (t) {
+      if (termIds.indexOf(t.id) < 0) return;
+      if (t.status !== TERM.pending && t.status !== TERM.proposal) throw new Error('Termin ' + t.date + ' nie czeka na akceptację.');
+      list.push(t);
+    });
+    if (!list.length) throw new Error('Zaznacz terminy do odrzucenia.');
+    list.forEach(function (t) { update_('Terminy', t._row, { status: TERM.rejected, proposed: '', decidedBy: u.name, decidedAt: nowIso_(), decisionNote: reason }); });
+    log_(r.id, u.email, 'Odrzucenie', reason);
+    refreshStatus_(r);
   });
-  if (!list.length) throw new Error('Zaznacz terminy do odrzucenia.');
-  log_(r.id, u.email, 'Odrzucenie', reason);
-  refreshStatus_(r);
   sendReaRejectedMail_(r, list, reason, u);
   return getRealization(r.id);
 }
@@ -571,52 +645,73 @@ function rejectTerms(id, termIds, reason) {
 // termIds: lista albo 'all' (wszystkie przyszłe aktywne terminy).
 function cancelTerms(id, termIds) {
   var u = me_();
-  var r = reaForDecision_(id, u);
-  if (r.requesterEmail !== u.email && !isStudio_(u) && !canApproveAny_(u)) throw new Error('Nie możesz anulować tego zlecenia.');
-  var now = new Date(), list = [];
-  termsOf_(r.id).forEach(function (t) {
-    if (termIds !== 'all' && termIds.indexOf(t.id) < 0) return;
-    if ([TERM.pending, TERM.proposal, TERM.ok].indexOf(t.status) < 0 || toDate_(t.date, sr_block(t).from) <= now) return;
-    deleteTermEvent_(t);
-    update_('Terminy', t._row, { status: TERM.cancelled, eventId: '', proposed: '', decidedBy: u.name, decidedAt: nowIso_() });
-    list.push(t);
+  var r, list = [], failed = [];
+  withLock_(function () {
+    r = reaForDecision_(id, u);
+    if (r.requesterEmail !== u.email && !isStudio_(u) && !canApproveAny_(u)) throw new Error('Nie możesz anulować tego zlecenia.');
+    var now = new Date();
+    termsOf_(r.id).forEach(function (t) {
+      if (termIds !== 'all' && (!Array.isArray(termIds) || termIds.indexOf(t.id) < 0)) return;
+      if ([TERM.pending, TERM.proposal, TERM.ok].indexOf(t.status) < 0 || toDate_(t.date, sr_block(t).from) <= now) return;
+      if (!deleteTermEvent_(t)) { failed.push(t.date); return; }
+      update_('Terminy', t._row, { status: TERM.cancelled, eventId: '', proposed: '', decidedBy: u.name, decidedAt: nowIso_() });
+      list.push(t);
+    });
+    if (!list.length && !failed.length) throw new Error('Nie ma przyszłych terminów do anulowania.');
+    if (list.length) log_(r.id, u.email, 'Anulowanie', list.map(function (t) { return t.date; }).join(', '));
+    refreshStatus_(r);
   });
-  if (!list.length) throw new Error('Nie ma przyszłych terminów do anulowania.');
-  log_(r.id, u.email, 'Anulowanie', list.map(function (t) { return t.date; }).join(', '));
-  refreshStatus_(r);
-  sendReaCancelledMail_(r, list, u);
+  if (list.length) sendReaCancelledMail_(r, list, u);
+  if (failed.length) throw new Error('Nie udało się usunąć wydarzenia z kalendarza (' + failed.join(', ') + ') — spróbuj ponownie za chwilę.');
   return getRealization(r.id);
+}
+
+// Zarządzający cofa „Zrealizowane" (np. materiał jeszcze do oddania) albo zamyka ręcznie.
+function setRealizationOpen(id, open) {
+  var u = me_();
+  if (!isManager_(u)) throw new Error('To może zmienić zarządzający studiem.');
+  withLock_(function () {
+    var r = findRea_(id);
+    if (!r) throw new Error('Nie znaleziono zlecenia.');
+    update_('Realizacje', r._row, { holdOpen: open ? '1' : '', updatedAt: nowIso_() });
+    r.holdOpen = open ? '1' : '';
+    log_(r.id, u.email, open ? 'Cofnięto „Zrealizowane”' : 'Oznaczono jako zrealizowane', '');
+    refreshStatus_(r);
+  });
+  return getRealization(id);
 }
 
 // --- obsada ---
 
 function claimRealization(id) {
   var u = requireStudio_();
-  var lock = LockService.getScriptLock();
-  lock.waitLock(30000);
   var r;
-  try {
+  withLock_(function () {
     r = findRea_(id);
     if (!r) throw new Error('Nie znaleziono zlecenia.');
+    if ([REA.pending, REA.ok, REA.proposal].indexOf(r.status) < 0) throw new Error('Ta realizacja nie jest już aktywna.');
     var a = json_(r.assignees, []);
-    if (a.some(function (x) { return x.email === u.email; })) return getRealization(id);
+    if (a.some(function (x) { return x.email === u.email; })) return;
     if (a.length >= (Number(r.staffNeeded) || 1)) throw new Error('Obsada jest już kompletna (' + a.map(function (x) { return x.name; }).join(', ') + ').');
     a.push({ email: u.email, name: u.name, at: nowIso_() });
     update_('Realizacje', r._row, { assignees: JSON.stringify(a), updatedAt: nowIso_() });
     r.assignees = JSON.stringify(a);
     log_(r.id, u.email, 'Obsada', u.name + ' bierze realizację');
-  } finally { lock.releaseLock(); }
+  });
   syncGuests_(r, u.email, null);
   return getRealization(id);
 }
 
 function releaseRealization(id) {
   var u = requireStudio_();
-  var r = findRea_(id);
-  if (!r) throw new Error('Nie znaleziono zlecenia.');
-  var a = json_(r.assignees, []).filter(function (x) { return x.email !== u.email; });
-  update_('Realizacje', r._row, { assignees: JSON.stringify(a), updatedAt: nowIso_() });
-  log_(r.id, u.email, 'Obsada', u.name + ' rezygnuje');
+  var r;
+  withLock_(function () {
+    r = findRea_(id);
+    if (!r) throw new Error('Nie znaleziono zlecenia.');
+    var a = json_(r.assignees, []).filter(function (x) { return x.email !== u.email; });
+    update_('Realizacje', r._row, { assignees: JSON.stringify(a), updatedAt: nowIso_() });
+    log_(r.id, u.email, 'Obsada', u.name + ' rezygnuje');
+  });
   syncGuests_(r, null, u.email);
   return getRealization(id);
 }
@@ -624,15 +719,38 @@ function releaseRealization(id) {
 function setStaffNeeded(id, n) {
   var u = me_();
   if (!canApproveAny_(u)) throw new Error('Obsadę ustala zarządzający studiem.');
-  var r = findRea_(id);
-  if (!r) throw new Error('Nie znaleziono zlecenia.');
   n = Math.max(1, Math.min(4, Number(n) || 1));
-  if (json_(r.assignees, []).length > n) throw new Error('Przypisanych osób jest więcej niż ' + n + ' — najpierw ktoś musi zrezygnować.');
-  update_('Realizacje', r._row, { staffNeeded: n, updatedAt: nowIso_() });
+  withLock_(function () {
+    var r = findRea_(id);
+    if (!r) throw new Error('Nie znaleziono zlecenia.');
+    if (json_(r.assignees, []).length > n) throw new Error('Przypisanych osób jest więcej niż ' + n + ' — najpierw ktoś musi zrezygnować.');
+    update_('Realizacje', r._row, { staffNeeded: n, updatedAt: nowIso_() });
+  });
   return getRealization(id);
 }
 
+// Zlecenie montażowe założone z realizacji (kreator montażu dostaje id realizacji w szkicu).
+function linkMontage_(reaId, projectId, u) {
+  try {
+    withLock_(function () {
+      var r = findRea_(reaId);
+      if (!r || !canSeeRea_(u, r)) return;
+      var ids = String(r.linkedMontageId || '').split(',').filter(String);
+      if (ids.indexOf(projectId) < 0) ids.push(projectId);
+      update_('Realizacje', r._row, { linkedMontageId: ids.join(','), updatedAt: nowIso_() });
+      log_(r.id, u.email, 'Zlecenie montażowe', projectId);
+    });
+  } catch (e) {}
+}
+
 // --- komentarze (wspólna zakładka Komentarze z montażem) ---
+
+// Strona studia w dyskusji: osoba ze studia albo zarządzający.
+function isStudioSide_(email) {
+  email = String(email || '').toLowerCase();
+  var a = findAccess_(email);
+  return (a && isStudio_({ role: String(a.role) })) || (!!studioManager_() && email === studioManager_());
+}
 
 function addReaComment_(id, text, u) {
   var r = findRea_(id);
@@ -651,28 +769,51 @@ function ensureStudioTrigger_() {
   props_().setProperty('STUDIO_TRIGGER', '1');
 }
 
+// Wyzwalacz czasowy (i ręczne uruchomienie z edytora). Z przeglądarki tylko admin; jedna instancja naraz.
 function dailyStudio() {
+  var active = String(Session.getActiveUser().getEmail() || '').toLowerCase(), owner = String(Session.getEffectiveUser().getEmail() || '').toLowerCase();
+  if (active && active !== owner) requireAdmin_();
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;
+  try { dailyStudio_(); } finally { lock.releaseLock(); }
+}
+
+function dailyStudio_() {
   var cal = studioCal_(), now = new Date(), hs = holSet_();
   var reas = {};
   rows_('Realizacje').forEach(function (r) { reas[r.id] = r; });
   var touched = {};
   rows_('Terminy').map(normTerm_).forEach(function (t) {
     var r = reas[t.realizationId];
-    if (!r || t.status !== TERM.ok || !t.eventId || termEnd_(t) < now) return;
-    var ev = null;
-    try { ev = cal.getEventById(t.eventId); } catch (e) {}
+    if (!r) return;
+    // Czekające / z propozycją, które minęły bez decyzji — wygasają.
+    if ((t.status === TERM.pending || t.status === TERM.proposal) && toDate_(t.date, sr_block(t).from) <= now) {
+      update_('Terminy', t._row, { status: TERM.cancelled, proposed: '', decisionNote: 'Termin minął bez decyzji' });
+      log_(r.id, 'system', 'Termin wygasł', t.date + ' — minął bez decyzji');
+      touched[r.id] = true;
+      return;
+    }
+    if (t.status !== TERM.ok || !t.eventId || termEnd_(t) < now) return;
+    var ev;
+    try { ev = cal.getEventById(t.eventId); } catch (e) { return; }  // błąd kalendarza ≠ usunięte — spróbujemy jutro
     if (!ev) {
       update_('Terminy', t._row, { status: TERM.cancelled, eventId: '', calChanged: 'Wydarzenie usunięte w kalendarzu ' + nowIso_().slice(0, 10) });
       log_(r.id, 'system', 'Termin zmieniony w kalendarzu', t.date + ': wydarzenie usunięte');
       touched[r.id] = true;
       return;
     }
-    // Przesunięcie w kalendarzu: przesuwamy gotowość/start o różnicę początku, koniec o różnicę końca.
-    var b = sr_block(t), s = ev.getStartTime(), e = ev.getEndTime();
-    var dFrom = Math.round((s - toDate_(t.date, b.from)) / 6e4), dTo = Math.round((e - toDate_(t.date, b.to)) / 6e4);
-    if (!dFrom && !dTo) return;
-    var nd = ymd_(s), shiftDays = sr_daysDiff(t.date, nd) * 1440;
-    var n = { date: nd, ready: sr_hm(sr_min(t.ready) + dFrom - shiftDays), start: sr_hm(sr_min(t.start) + dFrom - shiftDays), end: sr_hm(Math.max(sr_min(t.start) + dFrom - shiftDays + 15, sr_min(t.end) + dTo - shiftDays)) };
+    // Przesunięcie w kalendarzu: liczone na czasie zegarowym (bez pułapek zmiany czasu). Blok = gotowość − dojazd … koniec + zwijanie + dojazd.
+    var s = ev.getStartTime(), e = ev.getEndTime(), nd = ymd_(s);
+    var fromMin = sr_min(hm_(s)), toMin = sr_min(hm_(e)) + sr_daysDiff(nd, ymd_(e)) * 1440;
+    var lead = sr_min(t.start) - sr_min(t.ready);
+    var ready = fromMin + t.travelMin, start = ready + lead, end = toMin - t.teardownMin - t.travelMin;
+    if (ready < 0 || end > 1440 || end - start < 15) {
+      var note = 'Wydarzenie w kalendarzu ma godziny, których portal nie odwzoruje (' + nd + ' ' + hm_(s) + '–' + hm_(e) + ') — sprawdź ręcznie';
+      if (t.calChanged !== note) { update_('Terminy', t._row, { calChanged: note }); touched[r.id] = true; }
+      return;
+    }
+    var n = { date: nd, ready: sr_hm(ready), start: sr_hm(start), end: sr_hm(end) };
+    if (n.date === t.date && n.ready === t.ready && n.start === t.start && n.end === t.end) return;
     n.outOfHours = sr_outOfHours(Object.assign({}, t, n), hs);
     update_('Terminy', t._row, { date: n.date, ready: n.ready, start: n.start, end: n.end, outOfHours: n.outOfHours ? '1' : '',
       calChanged: 'Termin zmieniony w kalendarzu ' + nowIso_().slice(0, 10) + ' (było ' + t.date + ' ' + t.ready + '–' + t.end + ')' });
@@ -687,12 +828,12 @@ function dailyStudio() {
     if (!r || t.status !== TERM.ok || t.staffAlerted || t.date < today || t.date > horizon) return;
     var a = json_(r.assignees, []);
     if (a.length >= (Number(r.staffNeeded) || 1)) return;
-    sendReaStaffAlertMail_(r, t, a);
     update_('Terminy', t._row, { staffAlerted: nowIso_() });
+    sendReaStaffAlertMail_(r, t, a);
   });
   Object.keys(reas).forEach(function (id) {
     var r = reas[id];
-    if (touched[id] || r.status === REA.ok) refreshStatus_(r);
+    if (touched[id] || r.status === REA.ok || r.status === REA.pending || r.status === REA.proposal) refreshStatus_(r);
   });
 }
 
@@ -709,7 +850,7 @@ function migrateRezerwacje_() {
     var r = { id: id, createdAt: b.createdAt, updatedAt: nowIso_(), status: REA.pending, kind: kind, title: b.title, description: b.description,
       requesterName: b.requesterName, requesterEmail: b.requesterEmail, brand: b.brand, format: b.format, scope: '', guests: b.guests, platform: '',
       meetingLink: '', location: '', parking: '', boardConsent: 'Nie jest wymagana', tech: '[]', delivery: '', notes: b.notes, agendaFile: '',
-      seriesRule: '', conflictReason: '', staffNeeded: 1, assignees: '[]', folderId: '', legacyId: b.id };
+      seriesRule: '', conflictReason: '', staffNeeded: 1, assignees: '[]', folderId: '', legacyId: b.id, holdOpen: '', linkedMontageId: '', agendaText: '', logoBrand: '' };
     var t = { id: id + '-01', realizationId: id, n: 1, date: String(b.date), ready: String(b.start), start: String(b.start), end: String(b.end),
       teardownMin: 0, travelMin: 0, status: map[b.status] || TERM.cancelled, eventId: b.eventId || '', outOfHours: '', conflict: '', proposed: '', before: '',
       decidedBy: b.decidedBy || '', decidedAt: b.decidedAt || '', decisionNote: b.decisionNote || '', calChanged: '', staffAlerted: '' };
@@ -815,7 +956,7 @@ function sendReaStaffAlertMail_(r, t, a) {
 }
 
 function sendReaCommentMail_(r, text, u) {
-  var fromStudio = isStudio_(u) || canApproveAny_(u);
+  var fromStudio = u.email !== r.requesterEmail;  // pisze zgłaszający → studio; ktokolwiek inny → zgłaszający
   var box = '<div style="padding:12px 14px;border-radius:10px;background:#f6f6f8;color:#16161a;white-space:pre-wrap">' + esc_(text) + '</div>';
   var intro = '<b>' + esc_(u.name) + '</b> dodał(a) komentarz do „' + esc_(r.title) + '":<br><br>' + box;
   var to = fromStudio ? [r.requesterEmail] : (json_(r.assignees, []).map(function (a) { return a.email; }).concat(managerEmails_()));

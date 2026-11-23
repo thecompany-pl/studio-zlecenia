@@ -13,7 +13,7 @@ var SHEETS = {
     'guests', 'format', 'date', 'start', 'end', 'notes', 'eventId', 'decidedBy', 'decidedAt', 'decisionNote'],  // dawne, tylko do migracji
   Realizacje: ['id', 'createdAt', 'updatedAt', 'status', 'kind', 'title', 'description', 'requesterName', 'requesterEmail', 'brand', 'format',
     'scope', 'guests', 'platform', 'meetingLink', 'location', 'parking', 'boardConsent', 'tech', 'delivery', 'notes', 'agendaFile',
-    'seriesRule', 'conflictReason', 'staffNeeded', 'assignees', 'folderId', 'legacyId'],
+    'seriesRule', 'conflictReason', 'staffNeeded', 'assignees', 'folderId', 'legacyId', 'holdOpen', 'linkedMontageId', 'agendaText', 'logoBrand'],
   Terminy: ['id', 'realizationId', 'n', 'date', 'ready', 'start', 'end', 'teardownMin', 'travelMin', 'status', 'eventId', 'outOfHours',
     'conflict', 'proposed', 'before', 'decidedBy', 'decidedAt', 'decisionNote', 'calChanged', 'staffAlerted']
 };

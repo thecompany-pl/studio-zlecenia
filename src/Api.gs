@@ -158,6 +158,7 @@ function submitRequest(p) {
   append_('Projekty', rec);
   log_(id, u.email, 'Zgłoszenie', 'Preferowany termin: ' + deadline.replace('T', ' '));
   sendNewRequestMails_(rec);
+  if (/^REA-\d{4}-\d{4}$/.test(String(p.linkedRea || ''))) linkMontage_(p.linkedRea, id, u);
   return { id: id, deadline: deadline };
 }
 

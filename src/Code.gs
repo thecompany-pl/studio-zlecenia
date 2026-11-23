@@ -49,7 +49,7 @@ var PUBLIC_URL = 'https://zlecenia-studio.tc.pl/';
 function appUrl_() { return PUBLIC_URL; }
 
 // Uruchamia się samo przy pierwszym wejściu właściciela; można też odpalić ręcznie z edytora.
-var SCHEMA_VERSION = '5';
+var SCHEMA_VERSION = '6';
 var MAX_REVISIONS = 3;
 
 function ensureSetup_() {

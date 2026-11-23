@@ -69,9 +69,9 @@
   const evTitle = r => (r.kind === 'wyjazd' || r.location ? '[WYJAZD] ' : '[STD] ') + r.title;
   const busyOf = (date, skip) => {
     const show = me().role !== 'user' || canAppr();
-    const evs = CAL.filter(e => e.date === date && !(skip && e.reaId === skip)).map(e => ({ start: e.start, end: e.end, label: show ? e.title : 'Zajęte', tentative: false, reaId: show ? (e.reaId || '') : '' }));
-    const tent = TERMS.filter(t => (t.status === 'Czeka' || t.status === 'Propozycja') && t.realizationId !== skip).map(t => t.status === 'Propozycja' && t.proposed ? Object.assign({}, t, t.proposed) : t)
-      .filter(t => t.date === date).map(t => { const b = sr_block(t); return { start: sr_hm(b.from), end: sr_hm(b.to), label: show ? reaGet(t.realizationId).title + ' (czeka na akceptację)' : 'Wstępnie zajęte', tentative: true, reaId: show ? t.realizationId : '' }; });
+    const evs = CAL.filter(e => e.date === date && !(skip && e.termId === skip)).map(e => ({ start: e.start, end: e.end, label: show ? e.title : 'Zajęte', tentative: false, reaId: show ? (e.reaId || '') : '', termId: show ? (e.termId || '') : '' }));
+    const tent = TERMS.filter(t => (t.status === 'Czeka' || t.status === 'Propozycja') && t.id !== skip).map(t => t.status === 'Propozycja' && t.proposed ? Object.assign({}, t, t.proposed) : t)
+      .filter(t => t.date === date).map(t => { const b = sr_block(t); return { start: sr_hm(b.from), end: sr_hm(b.to), label: show ? reaGet(t.realizationId).title + ' (czeka na akceptację)' : 'Wstępnie zajęte', tentative: true, reaId: show ? t.realizationId : '', termId: show ? t.id : '' }; });
     return evs.concat(tent).sort((a, b) => a.start.localeCompare(b.start));
   };
   const kindL = k => ({ studio: 'Nagranie w studiu', avatar: 'Nagranie avatara', webinar: 'Webinar / szkolenie online', live: 'Transmisja live', wyjazd: 'Obsługa wyjazdowa' })[k] || k;
@@ -84,8 +84,8 @@
     const mine = r.assignees.some(a => a.email === ME);
     out.terms = terms.map(t => Object.assign({}, t, { hasEvent: !!t.eventId, canApprove: (t.status === 'Czeka' || t.status === 'Propozycja') && (isMgr() || (!t.outOfHours && studio && STS.canApprove)),
       canCancel: ['Czeka', 'Propozycja', 'Zaakceptowany'].includes(t.status) && (r.requesterEmail === ME || studio || canAppr()) }));
-    out.comments = (COMMENTS[r.id] || []); out.history = HIST[r.id] || [{ ts: r.createdAt, actor: r.requesterEmail, action: 'Zgłoszenie realizacji', details: '' }];
-    out.can = { approve: out.terms.some(t => t.canApprove), approveAny: canAppr(), manager: isMgr(), studio, acceptProposal: r.requesterEmail === ME && terms.some(t => t.status === 'Propozycja'),
+    out.comments = (COMMENTS[r.id] || []); out.linkedMontage = r.linkedMontage || []; out.agendaText = r.agendaText || ''; out.logoBrand = r.logoBrand || ''; out.holdOpen = !!r.holdOpen; out.history = HIST[r.id] || [{ ts: r.createdAt, actor: r.requesterEmail, action: 'Zgłoszenie realizacji', details: '' }];
+    out.can = { approve: out.terms.some(t => t.canApprove), approveAny: canAppr(), manager: isMgr(), studio, acceptProposal: r.requesterEmail === ME && terms.some(t => t.status === 'Propozycja'), reopen: isMgr() && reaSt(terms) === 'Zaakceptowane' && !!r.holdOpen,
       claim: studio && live && !mine && r.assignees.length < r.staffNeeded, release: studio && mine && live, staff: canAppr() && live, montage: studio || r.requesterEmail === ME };
     return out;
   };
@@ -115,22 +115,23 @@
         n.outOfHours = sr_outOfHours(n, hsM());
         if (n.outOfHours && !isMgr()) throw new Error(n.date + ': termin poza godzinami pracy akceptuje zarządzający studiem.');
         if (n.outOfHours && !(opts && opts.overtime)) throw new Error('Zaznacz „Zgoda na pracę poza godzinami”.');
-        const c = sr_conflict(n, busyOf(n.date, r.id));
+        const c = sr_conflict(n, busyOf(n.date, t.id).filter(b => !b.tentative));
         if (c) throw new Error(n.date + ': termin nachodzi na ' + c.start + '–' + c.end + ' (' + c.label + ').');
         const changed = ['date', 'ready', 'start', 'end'].some(k => n[k] !== t[k]);
         const evId = 'ev' + Math.round(Math.random() * 1e6), b = sr_block(n);
-        CAL.push({ id: evId, date: n.date, start: sr_hm(b.from), end: sr_hm(b.to), title: evTitle(r), reaId: r.id });
+        CAL.push({ id: evId, date: n.date, start: sr_hm(b.from), end: sr_hm(b.to), title: evTitle(r), reaId: r.id, termId: t.id });
         Object.assign(t, { date: n.date, ready: n.ready, start: n.start, end: n.end, status: 'Zaakceptowany', eventId: evId, outOfHours: n.outOfHours, conflict: '', proposed: null, before: changed ? { date: t.date, ready: t.ready, start: t.start, end: t.end } : null, decidedBy: me().name, decidedAt: iso() });
       });
       hist(id, 'Akceptacja', items.length + ' termin(y)');
       return reaOut(r, true);
     },
     proposeTerms: (id, items, comment) => { items.forEach(it => { const t = TERMS.find(x => x.id === it.id); Object.assign(t, { status: 'Propozycja', proposed: { date: it.date, ready: it.ready, start: it.start, end: it.end }, decisionNote: comment || '', decidedBy: me().name }); }); hist(id, 'Propozycja terminu', ''); return reaOut(reaGet(id), true); },
-    acceptProposal: id => { const r = reaGet(id); tOf(id).filter(t => t.status === 'Propozycja').forEach(t => { const n = Object.assign({}, t, t.proposed); const b = sr_block(n); const evId = 'ev' + Math.round(Math.random() * 1e6); CAL.push({ id: evId, date: n.date, start: sr_hm(b.from), end: sr_hm(b.to), title: evTitle(r), reaId: id }); Object.assign(t, { date: n.date, ready: n.ready, start: n.start, end: n.end, status: 'Zaakceptowany', eventId: evId, outOfHours: sr_outOfHours(n, hsM()), before: { date: t.date, ready: t.ready, start: t.start, end: t.end }, proposed: null }); }); hist(id, 'Przyjęcie terminu', ''); return reaOut(r, true); },
+    acceptProposal: id => { const r = reaGet(id); tOf(id).filter(t => t.status === 'Propozycja').forEach(t => { const n = Object.assign({}, t, t.proposed); const b = sr_block(n); const evId = 'ev' + Math.round(Math.random() * 1e6); CAL.push({ id: evId, date: n.date, start: sr_hm(b.from), end: sr_hm(b.to), title: evTitle(r), reaId: id, termId: t.id }); Object.assign(t, { date: n.date, ready: n.ready, start: n.start, end: n.end, status: 'Zaakceptowany', eventId: evId, outOfHours: sr_outOfHours(n, hsM()), before: { date: t.date, ready: t.ready, start: t.start, end: t.end }, proposed: null }); }); hist(id, 'Przyjęcie terminu', ''); return reaOut(r, true); },
     rejectTerms: (id, ids, reason) => { if (String(reason).trim().length < 10) throw new Error('Uzasadnij odrzucenie (min. 10 znaków).'); ids.forEach(x => Object.assign(TERMS.find(t => t.id === x), { status: 'Odrzucony', decisionNote: reason, decidedBy: me().name, decidedAt: iso(), proposed: null })); hist(id, 'Odrzucenie', reason); return reaOut(reaGet(id), true); },
     cancelTerms: (id, ids) => { tOf(id).filter(t => (ids === 'all' || ids.includes(t.id)) && ['Czeka', 'Propozycja', 'Zaakceptowany'].includes(t.status)).forEach(t => { const i = CAL.findIndex(e => e.id === t.eventId); if (i >= 0) CAL.splice(i, 1); Object.assign(t, { status: 'Anulowany', eventId: '' }); }); hist(id, 'Anulowanie', ''); return reaOut(reaGet(id), true); },
     claimRealization: id => { const r = reaGet(id); if (r.assignees.length >= r.staffNeeded) throw new Error('Obsada jest już kompletna.'); r.assignees.push({ email: ME, name: me().name }); return reaOut(r, true); },
     releaseRealization: id => { const r = reaGet(id); r.assignees = r.assignees.filter(a => a.email !== ME); return reaOut(r, true); },
+    setRealizationOpen: (id, open) => { const r = reaGet(id); r.holdOpen = !!open; hist(id, open ? 'Cofnięto „Zrealizowane”' : 'Oznaczono jako zrealizowane', ''); return reaOut(r, true); },
     setStaffNeeded: (id, n) => { const r = reaGet(id); r.staffNeeded = n; return reaOut(r, true); },
     saveStudioSettings: s => { Object.assign(STS, { manager: s.manager, canApprove: !!s.canApprove, notifyNew: !!s.notifyNew, location: s.location }); return settings(); },
     startDirectUpload: () => { throw new Error('direct-network'); },

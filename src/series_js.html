@@ -9,6 +9,15 @@ var SR_WORK = [9, 17];         // godziny pracy studia
 
 function sr_min(hm) { var p = String(hm).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
 function sr_hm(n) { n = Math.max(0, Math.min(24 * 60, n)); return dl_pad(Math.floor(n / 60)) + ':' + dl_pad(n % 60); }
+// Data istniejąca w kalendarzu (2026-11-31 albo 2026-13-01 nie przejdą — Date by je po cichu przewinął).
+function sr_validDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) && dl_addDays(d, 0) === d; }
+// Godzina 'HH:MM' w dobie (00:00–23:59) albo dokładnie 24:00, gdy allow24.
+function sr_validHm(hm, allow24) {
+  var m = /^(\d{2}):(\d{2})$/.exec(String(hm || ''));
+  if (!m) return false;
+  var h = Number(m[1]), mi = Number(m[2]);
+  return mi < 60 && (h < 24 || (!!allow24 && h === 24 && mi === 0));
+}
 function sr_daysInMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); } // m: 1–12
 
 // Blok zajętości ekipy: od gotowości minus dojazd do końca plus zwijanie i dojazd. Zwraca minuty od północy.
@@ -69,7 +78,8 @@ function sr_dates(rule, holidays) {
     out.push({ date: target, original: d, shifted: target !== d });
   }
   if (rule.type === 'manual') {
-    (rule.dates || []).slice().sort().forEach(function (d) { if (/^\d{4}-\d{2}-\d{2}$/.test(d)) push(d, false); });
+    (rule.dates || []).slice().sort().forEach(function (d) { if (sr_validDate(d)) push(d, false); });
+    out.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
     return out;
   }
   if (rule.type === 'weekly' || rule.type === 'biweekly') {
@@ -83,6 +93,7 @@ function sr_dates(rule, holidays) {
       if (rule.type === 'biweekly' && week % 2) continue;
       if (wd.indexOf(dl_weekday(d)) >= 0) push(d, false);
     }
+    out.sort(function (a, b) { return a.date < b.date ? -1 : 1; });  // przesunięcie ze święta może zmienić kolejność
     return out;
   }
   var y = Number(rule.start.slice(0, 4)), m = Number(rule.start.slice(5, 7));
@@ -109,10 +120,11 @@ function sr_describe(rule) {
   var N = { '1': 'pierwszy', '2': 'drugi', '3': 'trzeci', '4': 'czwarty', '5': 'piąty', '-1': 'ostatni' };
   if (!rule || !rule.type) return 'jednorazowo';
   if (rule.type === 'manual') return 'wybrane daty';
-  if (rule.type === 'weekly' || rule.type === 'biweekly') return (rule.type === 'weekly' ? 'co tydzień' : 'co 2 tygodnie') + ': ' + (rule.weekdays || []).map(function (w) { return D[w]; }).join(', ');
-  if (rule.type === 'monthlyDay') return 'co miesiąc, ' + rule.day + '. dnia';
-  return 'co miesiąc, ' + N[String(rule.nth)] + ' ' + D[rule.weekday];
+  if (rule.type === 'weekly' || rule.type === 'biweekly') return (rule.type === 'weekly' ? 'co tydzień' : 'co 2 tygodnie') + ': ' + (Array.isArray(rule.weekdays) ? rule.weekdays : []).map(function (w) { return D[w] || ''; }).join(', ');
+  if (rule.type === 'monthlyDay') return 'co miesiąc, ' + Number(rule.day) + '. dnia';
+  if (rule.type === 'monthlyNth') return 'co miesiąc, ' + (N[String(rule.nth)] || '') + ' ' + (D[rule.weekday] || '');
+  return 'seria';
 }
 
-if (typeof module !== 'undefined') module.exports = { sr_dates: sr_dates, sr_outOfHours: sr_outOfHours, sr_conflict: sr_conflict, sr_overlaps: sr_overlaps, sr_block: sr_block, sr_nthWeekday: sr_nthWeekday, sr_describe: sr_describe };
+if (typeof module !== 'undefined') module.exports = { sr_validDate: sr_validDate, sr_validHm: sr_validHm, sr_dates: sr_dates, sr_outOfHours: sr_outOfHours, sr_conflict: sr_conflict, sr_overlaps: sr_overlaps, sr_block: sr_block, sr_nthWeekday: sr_nthWeekday, sr_describe: sr_describe };
 </script>
