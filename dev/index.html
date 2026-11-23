@@ -2437,7 +2437,7 @@ function bindReaPage(p) {
   $('#cAll') && ($('#cAll').onclick = e => twoClick(e.currentTarget, 'Kliknij ponownie, żeby anulować', '#cAllHint', 'Terminy znikną z kalendarza studia, a druga strona dostanie maila.', () => act(e.currentTarget, () => api('cancelTerms', p.id, 'all'), 'Anulowano.')));
   $('#mkMontage') && ($('#mkMontage').onclick = () => {
     const cur = store.get('stz_draft', null) || {};
-    store.set('stz_draft', Object.assign({}, cur, { title: cur.title || p.title, description: (cur.description ? cur.description + '\n\n' : '') + 'Materiał z realizacji ' + p.id + ' („' + p.title + '”, ' + termLine(p.terms[0]) + '). Link: ' + (B.appUrl || '') + '?r=' + p.id, brand: cur.brand || p.brand || '' }));
+    store.set('stz_draft', Object.assign({}, cur, { title: cur.title || p.title, description: (cur.description ? cur.description + '\n\n' : '') + 'Materiał z realizacji ' + p.id + ' („' + p.title + '”, ' + termLine(p.terms.find(t => t.status === TS().ok) || p.terms[0]) + '). Link: ' + (B.appUrl || '') + '?r=' + p.id, brand: cur.brand || p.brand || '' }));
     store.set('stz_step', 0); if (typeof W !== 'undefined') { W.d = null; W.step = 0; }
     nav.push('/nowe');
   });
