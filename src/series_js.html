@@ -1,0 +1,118 @@
+<script>
+// WYGENEROWANE z Series.gs przez tools/build.mjs — nie edytuj ręcznie.
+// Terminy realizacji studyjnych: serie cykliczne, godziny pracy, kolizje. Plik współdzielony:
+// tools/build.mjs kopiuje go do series_js.html dla przeglądarki. Wymaga Deadline.gs (dl_addDays, dl_weekday, dl_isWorkday).
+// Daty 'YYYY-MM-DD', godziny 'HH:MM', bez stref czasowych. ES5 — działa w Apps Script i w przeglądarce.
+
+var SR_MAX = 26;               // maks. wystąpień w serii
+var SR_WORK = [9, 17];         // godziny pracy studia
+
+function sr_min(hm) { var p = String(hm).split(':'); return Number(p[0]) * 60 + Number(p[1]); }
+function sr_hm(n) { n = Math.max(0, Math.min(24 * 60, n)); return dl_pad(Math.floor(n / 60)) + ':' + dl_pad(n % 60); }
+function sr_daysInMonth(y, m) { return new Date(Date.UTC(y, m, 0)).getUTCDate(); } // m: 1–12
+
+// Blok zajętości ekipy: od gotowości minus dojazd do końca plus zwijanie i dojazd. Zwraca minuty od północy.
+function sr_block(t) {
+  var travel = Number(t.travelMin) || 0;
+  return { from: sr_min(t.ready || t.start) - travel, to: sr_min(t.end) + (Number(t.teardownMin) || 0) + travel };
+}
+
+// Poza godzinami pracy: dzień wolny albo blok ekipy wychodzi poza 9:00–17:00 (styk z granicą jest w porządku).
+function sr_outOfHours(t, hs) {
+  var b = sr_block(t);
+  return !dl_isWorkday(t.date, hs) || b.from < SR_WORK[0] * 60 || b.to > SR_WORK[1] * 60;
+}
+
+// Kolizja przedziałów [from, to) w minutach — koniec jednego równy początkowi drugiego to nie kolizja.
+function sr_overlaps(aFrom, aTo, bFrom, bTo) { return aFrom < bTo && bFrom < aTo; }
+
+// Pierwsza kolizja bloku terminu z listą zajętości dnia [{start:'HH:MM', end:'HH:MM', ...}].
+function sr_conflict(t, busy) {
+  var b = sr_block(t);
+  for (var i = 0; i < (busy || []).length; i++) {
+    if (sr_overlaps(b.from, b.to, sr_min(busy[i].start), sr_min(busy[i].end))) return busy[i];
+  }
+  return null;
+}
+
+function sr_nextWorkday(ymd, hs) { var d = ymd; while (!dl_isWorkday(d, hs)) d = dl_addDays(d, 1); return d; }
+
+// n-ty (1–5) dzień tygodnia w miesiącu; nth = -1 → ostatni. Zwraca null, gdy taki dzień nie istnieje (np. 5. wtorek).
+function sr_nthWeekday(y, m, weekday, nth) {
+  var dim = sr_daysInMonth(y, m), first = dl_ymd(new Date(Date.UTC(y, m - 1, 1)));
+  if (nth === -1) {
+    var last = dl_ymd(new Date(Date.UTC(y, m - 1, dim)));
+    return dl_addDays(last, -((dl_weekday(last) - weekday + 7) % 7));
+  }
+  var d = dl_addDays(first, (weekday - dl_weekday(first) + 7) % 7 + (nth - 1) * 7);
+  return Number(d.slice(5, 7)) === m ? d : null;
+}
+
+// Generator dat serii. rule:
+//   type: 'weekly' | 'biweekly' | 'monthlyDay' | 'monthlyNth' | 'manual'
+//   start: data pierwszego możliwego wystąpienia
+//   weekdays: [0–6] (weekly/biweekly), day: 1–31 (monthlyDay), nth: 1–5 lub -1, weekday: 0–6 (monthlyNth)
+//   count: liczba wystąpień albo until: data końcowa (włącznie); dates: [...] (manual)
+//   shiftHolidays: domyślnie true — święto (a w seriach miesięcznych także weekend) przesuwa na następny dzień roboczy
+// Zwraca [{ date, original, shifted }] posortowane, bez duplikatów, maks. SR_MAX.
+function sr_dates(rule, holidays) {
+  var hs = dl_holidaySet(holidays), out = [], seen = {};
+  var cap = Math.min(SR_MAX, Number(rule.count) > 0 ? Number(rule.count) : SR_MAX);
+  var until = rule.until || dl_addDays(rule.start, 731);
+  var shift = rule.shiftHolidays !== false;
+  function push(d, monthly) {
+    if (out.length >= cap || d < rule.start || d > until) return;
+    var target = d;
+    if (shift && (hs[d] || (monthly && !dl_isWorkday(d, hs)))) target = sr_nextWorkday(d, hs);
+    if (seen[target]) return;
+    seen[target] = true;
+    out.push({ date: target, original: d, shifted: target !== d });
+  }
+  if (rule.type === 'manual') {
+    (rule.dates || []).slice().sort().forEach(function (d) { if (/^\d{4}-\d{2}-\d{2}$/.test(d)) push(d, false); });
+    return out;
+  }
+  if (rule.type === 'weekly' || rule.type === 'biweekly') {
+    var wd = (rule.weekdays || []).map(Number);
+    if (!wd.length) return out;
+    var monday = dl_addDays(rule.start, -((dl_weekday(rule.start) + 6) % 7));
+    for (var i = 0; i < 800 && out.length < cap; i++) {
+      var d = dl_addDays(rule.start, i);
+      if (d > until) break;
+      var week = Math.floor((sr_daysDiff(monday, d)) / 7);
+      if (rule.type === 'biweekly' && week % 2) continue;
+      if (wd.indexOf(dl_weekday(d)) >= 0) push(d, false);
+    }
+    return out;
+  }
+  var y = Number(rule.start.slice(0, 4)), m = Number(rule.start.slice(5, 7));
+  for (var k = 0; k < 30 && out.length < cap; k++) {
+    var md;
+    if (rule.type === 'monthlyDay') md = y + '-' + dl_pad(m) + '-' + dl_pad(Math.min(Number(rule.day) || 1, sr_daysInMonth(y, m)));
+    else md = sr_nthWeekday(y, m, Number(rule.weekday), Number(rule.nth));
+    if (md && md > until) break;
+    if (md) push(md, true);
+    m++; if (m > 12) { m = 1; y++; }
+  }
+  out.sort(function (a, b) { return a.date < b.date ? -1 : 1; });
+  return out;
+}
+
+function sr_daysDiff(a, b) {
+  var pa = a.split('-').map(Number), pb = b.split('-').map(Number);
+  return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 864e5);
+}
+
+// Czytelny opis reguły do maili i podsumowania.
+function sr_describe(rule) {
+  var D = ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'];
+  var N = { '1': 'pierwszy', '2': 'drugi', '3': 'trzeci', '4': 'czwarty', '5': 'piąty', '-1': 'ostatni' };
+  if (!rule || !rule.type) return 'jednorazowo';
+  if (rule.type === 'manual') return 'wybrane daty';
+  if (rule.type === 'weekly' || rule.type === 'biweekly') return (rule.type === 'weekly' ? 'co tydzień' : 'co 2 tygodnie') + ': ' + (rule.weekdays || []).map(function (w) { return D[w]; }).join(', ');
+  if (rule.type === 'monthlyDay') return 'co miesiąc, ' + rule.day + '. dnia';
+  return 'co miesiąc, ' + N[String(rule.nth)] + ' ' + D[rule.weekday];
+}
+
+if (typeof module !== 'undefined') module.exports = { sr_dates: sr_dates, sr_outOfHours: sr_outOfHours, sr_conflict: sr_conflict, sr_overlaps: sr_overlaps, sr_block: sr_block, sr_nthWeekday: sr_nthWeekday, sr_describe: sr_describe };
+</script>

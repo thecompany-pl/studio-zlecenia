@@ -10,7 +10,12 @@ var SHEETS = {
   Dostep: ['email', 'name', 'role', 'addedBy', 'addedAt'],
   Swieta: ['date', 'name'],
   Rezerwacje: ['id', 'createdAt', 'updatedAt', 'status', 'title', 'description', 'requesterName', 'requesterEmail', 'brand',
-    'guests', 'format', 'date', 'start', 'end', 'notes', 'eventId', 'decidedBy', 'decidedAt', 'decisionNote']
+    'guests', 'format', 'date', 'start', 'end', 'notes', 'eventId', 'decidedBy', 'decidedAt', 'decisionNote'],  // dawne, tylko do migracji
+  Realizacje: ['id', 'createdAt', 'updatedAt', 'status', 'kind', 'title', 'description', 'requesterName', 'requesterEmail', 'brand', 'format',
+    'scope', 'guests', 'platform', 'meetingLink', 'location', 'parking', 'boardConsent', 'tech', 'delivery', 'notes', 'agendaFile',
+    'seriesRule', 'conflictReason', 'staffNeeded', 'assignees', 'folderId', 'legacyId'],
+  Terminy: ['id', 'realizationId', 'n', 'date', 'ready', 'start', 'end', 'teardownMin', 'travelMin', 'status', 'eventId', 'outOfHours',
+    'conflict', 'proposed', 'before', 'decidedBy', 'decidedAt', 'decisionNote', 'calChanged', 'staffAlerted']
 };
 
 var ss__ = null;

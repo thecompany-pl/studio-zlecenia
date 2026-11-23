@@ -16,7 +16,7 @@ function getBootstrap() {
     holidays: holidays_(),
     statuses: STATUSES, brands: BRANDS, categories: CATEGORIES, formats: FORMATS,
     platforms: PLATFORMS, priorities: PRIORITIES, domains: ALLOWED_DOMAINS,
-    bkGuests: BK_GUESTS, bkFormats: BK_FORMATS, bkWork: [BK_WORK_FROM, BK_WORK_TO], bkDay: [BK_DAY_FROM, BK_DAY_TO], canApprove: canApprove_(u),
+    rea: reaConfig_(), canApproveRea: canApproveAny_(u), isManager: isManager_(u),
     now: nowParts_(),
     appUrl: appUrl_()
   };
@@ -371,6 +371,7 @@ function addComment(id, text, token) {
   var u = me_();
   text = String(text || '').trim().slice(0, 4000);
   if (!text) throw new Error('Pusty komentarz.');
+  if (/^RE[AZ]-/.test(String(id))) return addReaComment_(id, text, u);
   var r = findProject_(id);
   if (!r || !canSee_(u, r, token)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
   append_('Komentarze', { ts: nowIso_(), projectId: id, authorEmail: u.email, authorName: u.name, text: text });
@@ -478,7 +479,8 @@ function getSettings() {
     access: rows_('Dostep').map(function (r) { return { email: r.email, name: r.name, role: r.role, addedBy: r.addedBy, addedAt: r.addedAt }; }),
     presets: presets_(),
     holidays: holidays_(),
-    studioManager: studioManager_()
+    studioManager: studioManager_(),
+    studio: studioSettings_()
   };
 }
 

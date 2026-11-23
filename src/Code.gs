@@ -49,7 +49,7 @@ var PUBLIC_URL = 'https://zlecenia-studio.tc.pl/';
 function appUrl_() { return PUBLIC_URL; }
 
 // Uruchamia się samo przy pierwszym wejściu właściciela; można też odpalić ręcznie z edytora.
-var SCHEMA_VERSION = '4';
+var SCHEMA_VERSION = '5';
 var MAX_REVISIONS = 3;
 
 function ensureSetup_() {
@@ -79,6 +79,8 @@ function migrate_() {
       }
     });
   });
+  migrateRezerwacje_();
+  try { ensureStudioTrigger_(); } catch (e) {}  // bez zgody na wyzwalacze — włączy je autoryzujKalendarz()
   props_().setProperty('SCHEMA', SCHEMA_VERSION);
 }
 
