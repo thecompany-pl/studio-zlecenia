@@ -794,7 +794,7 @@ function drawProject(p) {
     if (t.length < 10) return toast('Opisz poprawki (min. 10 znaków).', 'bad');
     act(e.currentTarget, () => api('requestRevision', p.id, t, TOK[p.id] || ''), 'Poprawki wysłane do studia.');
   });
-  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, TOK[p.id] || ''), 'Komentarz dodany.'); });
+  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, TOK[p.id] || '').then(np => { if ($('#cmIn')) $('#cmIn').value = ''; return np; }), 'Komentarz dodany.'); });
   $$('[data-file]').forEach(b => b.onclick = async () => {
     const old = b.innerHTML; b.style.opacity = .6;
     try {

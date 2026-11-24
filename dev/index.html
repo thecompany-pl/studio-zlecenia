@@ -1526,7 +1526,7 @@ function drawProject(p) {
     if (t.length < 10) return toast('Opisz poprawki (min. 10 znaków).', 'bad');
     act(e.currentTarget, () => api('requestRevision', p.id, t, TOK[p.id] || ''), 'Poprawki wysłane do studia.');
   });
-  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, TOK[p.id] || ''), 'Komentarz dodany.'); });
+  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, TOK[p.id] || '').then(np => { if ($('#cmIn')) $('#cmIn').value = ''; return np; }), 'Komentarz dodany.'); });
   $$('[data-file]').forEach(b => b.onclick = async () => {
     const old = b.innerHTML; b.style.opacity = .6;
     try {
@@ -2657,7 +2657,7 @@ function bindReaPage(p) {
   $('#stRel') && ($('#stRel').onclick = e => act(e.currentTarget, () => api('releaseRealization', p.id), 'Zrezygnowano z realizacji.'));
   $('#stNeed') && ($('#stNeed').onchange = e => { const n = Number(e.currentTarget.value); act(e.currentTarget, () => api('setStaffNeeded', p.id, n), 'Zapisano obsadę.'); });
   $('#reopen') && ($('#reopen').onclick = e => act(e.currentTarget, () => api('setRealizationOpen', p.id, !p.holdOpen), p.holdOpen ? 'Oznaczono jako zrealizowane.' : 'Cofnięto „Zrealizowane”.'));
-  $('#rcAdd') && ($('#rcAdd').onclick = e => { const t = $('#rcIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, ''), 'Komentarz dodany.'); });
+  $('#rcAdd') && ($('#rcAdd').onclick = e => { const t = $('#rcIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, '').then(np => { if ($('#rcIn')) $('#rcIn').value = ''; return np; }), 'Komentarz dodany.'); });
   const twoClick = (btn, label, hintSel, hint, fn) => {
     if (!btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = label; btn.classList.add('btn-rej'); if (hintSel && $(hintSel)) $(hintSel).textContent = hint; return; }
     fn();
