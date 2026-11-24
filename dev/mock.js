@@ -100,9 +100,8 @@
     studioRange: (from, n) => REA_API.studioDays(Array.from({ length: n }, (_, i) => dl_addDays(from, i))),
     createRealization: p => {
       if (!p.terms.length) throw new Error('Wybierz termin.');
-      const terms = p.terms.map(t => Object.assign({}, t, { teardownMin: p.teardownMin || 0, travelMin: p.travelMin || 0 }));
+      const terms = p.terms.map(t => Object.assign({}, t, { teardownMin: 0, travelMin: 0 }));
       terms.forEach(t => { const c = sr_conflict(t, busyOf(t.date)); t.conflict = c ? c.start + '–' + c.end + ' ' + c.label : ''; });
-      if (terms.some(t => t.conflict) && String(p.conflictReason || '').trim().length < 10) throw new Error('Część terminów nachodzi na inne rezerwacje — napisz, dlaczego (min. 10 znaków).');
       const id = addRea(Object.assign({}, p, { requesterEmail: ME, agendaFile: p.agendaFile ? { id: p.agendaFile.id, name: p.agendaFile.name, size: p.agendaFile.size } : null }), terms);
       return reaOut(reaGet(id), true);
     },

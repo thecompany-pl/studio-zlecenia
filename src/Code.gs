@@ -49,7 +49,7 @@ var PUBLIC_URL = 'https://zlecenia-studio.tc.pl/';
 function appUrl_() { return PUBLIC_URL; }
 
 // Uruchamia się samo przy pierwszym wejściu właściciela; można też odpalić ręcznie z edytora.
-var SCHEMA_VERSION = '6';
+var SCHEMA_VERSION = '7';
 var MAX_REVISIONS = 3;
 
 function ensureSetup_() {
@@ -78,6 +78,10 @@ function migrate_() {
         sh.getRange(1, i + 1, sh.getMaxRows(), 1).setNumberFormat('@');
       }
     });
+  });
+  ['ready', 'start', 'end'].forEach(function (k) {  // godziny w Terminy zawsze jako tekst
+    var col = SHEETS.Terminy.indexOf(k) + 1, sh = sh_('Terminy');
+    if (sh && col > 0) sh.getRange(2, col, sh.getMaxRows() - 1, 1).setNumberFormat('@');
   });
   migrateRezerwacje_();
   try { ensureStudioTrigger_(); } catch (e) {}  // bez zgody na wyzwalacze — włączy je autoryzujKalendarz()

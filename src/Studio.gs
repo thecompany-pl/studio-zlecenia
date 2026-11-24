@@ -267,8 +267,7 @@ function createRealization(p) {
   var list = (p.terms || []).slice(0, SR_MAX + 1);
   if (!list.length) throw new Error('Wybierz termin.');
   if (list.length > SR_MAX) throw new Error('Seria może mieć maksymalnie ' + SR_MAX + ' wystąpień.');
-  var teardown = Math.max(0, Math.min(180, Number(p.teardownMin) || 0));
-  var travel = isAway_(p) ? Math.max(0, Math.min(240, Number(p.travelMin) || 0)) : 0;
+  var teardown = 0, travel = 0;  // czas zwijania i dojazdu ustala studio przy akceptacji
   var seen = {};
   var terms = list.map(function (x) {
     var t = { date: String(x.date), ready: String(x.ready), start: String(x.start), end: String(x.end), teardownMin: teardown, travelMin: travel };
@@ -290,7 +289,6 @@ function createRealization(p) {
       t.conflict = c ? c.start + '–' + c.end + (c.label && c.label !== 'Zajęte' && c.label !== 'Wstępnie zajęte' ? ' ' + c.label : '') : '';
       if (c) conflicts++;
     });
-    if (conflicts && String(p.conflictReason || '').trim().length < 10) throw new Error('Część terminów nachodzi na inne rezerwacje — napisz, dlaczego potrzebujesz właśnie tych godzin (min. 10 znaków), albo zmień termin.');
     var id = nextReaId_();
     var agenda = null;
     if (p.agendaFile && p.agendaFile.id) {
@@ -308,7 +306,7 @@ function createRealization(p) {
       meetingLink: String(p.meetingLink || '').trim(), location: isAway_(p) ? String(p.location).trim().slice(0, 300) : '',
       parking: isAway_(p) ? p.parking : '', boardConsent: p.boardConsent, tech: JSON.stringify(p.tech || []), delivery: p.delivery || '',
       notes: String(p.notes || '').trim(), agendaFile: agenda ? JSON.stringify(agenda) : '', seriesRule: terms.length > 1 ? JSON.stringify(cleanRule_(p.seriesRule)) : '',
-      conflictReason: conflicts ? String(p.conflictReason).trim().slice(0, 1000) : '', staffNeeded: 1, assignees: '[]', folderId: agenda ? reaFolder_(id).getId() : '', legacyId: '',
+      conflictReason: String(p.conflictReason || '').trim().slice(0, 1000), staffNeeded: 1, assignees: '[]', folderId: agenda ? reaFolder_(id).getId() : '', legacyId: '',
       holdOpen: '', linkedMontageId: '', agendaText: String(p.agendaText || '').trim().slice(0, 4000),
       logoBrand: (p.tech || []).indexOf('Tło z logo brandu') >= 0 && BRANDS.indexOf(p.logoBrand) >= 0 ? p.logoBrand : ''
     };
@@ -493,6 +491,12 @@ function withLock_(fn) {
   try { return fn(); } finally { lock.releaseLock(); }
 }
 
+// Zwijanie sprzętu i dojazd: ustawia studio (zgłaszający ich nie podaje).
+function extras_(it, t) {
+  var lim = function (v, max, dflt) { v = Number(v); return v >= 0 && v <= max ? Math.round(v) : dflt; };
+  return { teardownMin: lim(it.teardownMin, 180, t.teardownMin || 0), travelMin: lim(it.travelMin, 240, t.travelMin || 0) };
+}
+
 // Unikalne pozycje po id (ten sam termin dwa razy = dwa wydarzenia w kalendarzu).
 function uniqItems_(items) {
   var seen = {};
@@ -518,7 +522,7 @@ function commitTerms_(r, picked, u, extraPatch) {
       evId = createTermEvent_(r, x.t);
       var changed = ['date', 'ready', 'start', 'end'].some(function (k) { return x.t[k] !== x.old[k]; });
       update_('Terminy', x.old._row, Object.assign({ date: x.t.date, ready: x.t.ready, start: x.t.start, end: x.t.end, status: TERM.ok, eventId: evId,
-        outOfHours: x.t.outOfHours ? '1' : '', conflict: '', proposed: '',
+        teardownMin: x.t.teardownMin, travelMin: x.t.travelMin, outOfHours: x.t.outOfHours ? '1' : '', conflict: '', proposed: '',
         before: changed ? JSON.stringify({ date: x.old.date, ready: x.old.ready, start: x.old.start, end: x.old.end }) : '' }, extraPatch(x)));
       done.push(Object.assign({}, x.t, { before: changed ? x.old : null }));
     } catch (e) {
@@ -543,7 +547,7 @@ function approveTerms(id, items, opts) {
     var picked = items.map(function (it) {
       var t = terms.filter(function (x) { return x.id === it.id; })[0];
       if (!t || (t.status !== TERM.pending && t.status !== TERM.proposal)) throw new Error('Termin ' + it.id + ' nie czeka na akceptację.');
-      var n = Object.assign({}, t, { date: String(it.date || t.date), ready: String(it.ready || t.ready), start: String(it.start || t.start), end: String(it.end || t.end) });
+      var n = Object.assign({}, t, { date: String(it.date || t.date), ready: String(it.ready || t.ready), start: String(it.start || t.start), end: String(it.end || t.end) }, extras_(it, t));
       validateTerm_(n);
       n.outOfHours = sr_outOfHours(n, hs);
       if (n.outOfHours && !isManager_(u)) throw new Error(n.date + ': termin poza godzinami pracy akceptuje zarządzający studiem.');
@@ -579,10 +583,10 @@ function proposeTerms(id, items, comment) {
     var picked = items.map(function (it) {
       var t = terms.filter(function (x) { return x.id === it.id; })[0];
       if (!t || (t.status !== TERM.pending && t.status !== TERM.proposal)) throw new Error('Termin ' + it.id + ' nie czeka na akceptację.');
-      var n = Object.assign({}, t, { date: String(it.date), ready: String(it.ready), start: String(it.start), end: String(it.end) });
+      var n = Object.assign({}, t, { date: String(it.date), ready: String(it.ready), start: String(it.start), end: String(it.end) }, extras_(it, t));
       validateTerm_(n);
       if (sr_outOfHours(n, hs) && !isManager_(u)) throw new Error(n.date + ': termin poza godzinami pracy proponuje zarządzający studiem.');
-      return { t: t, prop: { date: n.date, ready: n.ready, start: n.start, end: n.end } };
+      return { t: t, prop: { date: n.date, ready: n.ready, start: n.start, end: n.end, teardownMin: n.teardownMin, travelMin: n.travelMin } };
     });
     picked.forEach(function (x) {
       update_('Terminy', x.t._row, { status: TERM.proposal, proposed: JSON.stringify(x.prop), decidedBy: u.name, decidedAt: nowIso_(), decisionNote: comment });
@@ -910,7 +914,7 @@ function sendReaApprovalMail_(r, terms) {
   var subj = 'Do akceptacji: ' + r.title + ' · ' + termWhen_(terms[0]).split(' (')[0] + (out ? ' · poza godzinami' : '') + (terms.length > 1 ? ' · seria ×' + terms.length : '');
   var warn = [];
   if (out) warn.push('część terminów wypada poza godzinami ' + SR_WORK[0] + ':00–' + SR_WORK[1] + ':00');
-  if (terms.some(function (t) { return t.conflict; })) warn.push('kolizja z kalendarzem — uzasadnienie: „' + esc_(r.conflictReason) + '"');
+  if (terms.some(function (t) { return t.conflict; })) warn.push('kolizja z kalendarzem (' + esc_(terms.filter(function (t) { return t.conflict; }).map(function (t) { return t.date + ' ' + t.conflict; }).join('; ')) + ')' + (r.conflictReason ? ' — dlaczego ważne: „' + esc_(r.conflictReason) + '"' : ''));
   if (r.boardConsent === 'Nie') warn.push('brak zgody Zarządu TC na nagrywanie');
   send_(r.id, to, [], subj,
     mailHtml_('Nowe zlecenie studyjne', '<b>' + esc_(r.requesterName) + '</b> zgłasza realizację „' + esc_(r.title) + '".' + (warn.length ? '<br><br><b style="color:#b26a00">Uwaga:</b> ' + warn.join('; ') + '.' : '') +

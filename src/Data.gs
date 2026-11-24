@@ -22,12 +22,22 @@ var ss__ = null;
 function ss_() { return ss__ || (ss__ = SpreadsheetApp.openById(prop_('SHEET_ID'))); }
 function sh_(name) { return ss_().getSheetByName(name); }
 
+// Sheets potrafi zamienić tekst '12:00' / '2026-11-26' na czas / datę. Datę oddajemy jako 'yyyy-MM-dd',
+// a samą godzinę (Date z roku 1899) — tak, jak ją widać w arkuszu ('12:00'), bez przeliczeń stref.
 function rows_(name) {
-  var v = sh_(name).getDataRange().getValues();
+  var rng = sh_(name).getDataRange();
+  var v = rng.getValues(), disp = null;
   var h = v.shift() || [];
   return v.filter(function (r) { return r.join('') !== ''; }).map(function (r, i) {
     var o = { _row: i + 2 };
-    h.forEach(function (k, j) { o[k] = r[j] instanceof Date ? Utilities.formatDate(r[j], TZ, 'yyyy-MM-dd') : r[j]; });
+    h.forEach(function (k, j) {
+      var x = r[j];
+      if (x instanceof Date) {
+        if (x.getFullYear() < 1901) { disp = disp || rng.getDisplayValues(); x = String(disp[i + 1][j]).slice(0, 5); }
+        else x = Utilities.formatDate(x, TZ, 'yyyy-MM-dd');
+      }
+      o[k] = x;
+    });
     return o;
   });
 }
@@ -36,6 +46,7 @@ function rows_(name) {
 function cell_(v) {
   if (v === undefined || v === null) return '';
   if (typeof v === 'string' && /^[=+\-@]/.test(v)) return "'" + v;
+  if (typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v)) return "'" + v;  // godzina zostaje tekstem
   return v;
 }
 
