@@ -906,7 +906,7 @@ function sendReaSubmittedMail_(r, terms) {
 
 function sendReaApprovalMail_(r, terms) {
   var out = terms.some(function (t) { return t.outOfHours; });
-  var to = managerEmails_().concat(prop_('STUDIO_NOTIFY_NEW') !== '0' ? studioEmails_() : []);  // domyślnie jak w montażu: całe studio
+  var to = managerEmails_().concat(prop_('STUDIO_NOTIFY_NEW') !== '0' ? studioEmails_().filter(function (e) { return e !== r.requesterEmail; }) : []);  // domyślnie jak w montażu: całe studio
   var subj = 'Do akceptacji: ' + r.title + ' · ' + termWhen_(terms[0]).split(' (')[0] + (out ? ' · poza godzinami' : '') + (terms.length > 1 ? ' · seria ×' + terms.length : '');
   var warn = [];
   if (out) warn.push('część terminów wypada poza godzinami ' + SR_WORK[0] + ':00–' + SR_WORK[1] + ':00');

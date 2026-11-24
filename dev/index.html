@@ -444,7 +444,7 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .mo-ev.link{cursor:pointer}
 .mo-more{font-size:11px;color:var(--mut)}
 .btn.is-off{opacity:.45;box-shadow:none}
-.wk-col{cursor:crosshair;touch-action:none;user-select:none;-webkit-user-select:none}
+.wk-col{cursor:crosshair;touch-action:pan-x pan-y;user-select:none;-webkit-user-select:none}
 .wk-col.past{cursor:default;opacity:.7}
 .wk-ev{pointer-events:none}
 .wk-ev.link{pointer-events:auto}
@@ -1846,7 +1846,7 @@ function loadRea() {
   const s = store.get('stz_rea', null);
   RW = { step: Math.min(store.get('stz_rea_step', 0), RSTEPS - 1), d: Object.assign(REA_EMPTY(), s || {}), tried: {}, sending: false, dir: 1 };
   RW.d.rule = Object.assign(REA_EMPTY().rule, (s && s.rule) || {});
-  if (RW.d.date < nowWaw().date) { const f = REA_EMPTY(); RW.d.date = f.date; RW.d.excluded = {}; RW.d.moved = {}; }
+  if (RW.d.date < nowWaw().date) { const f = REA_EMPTY(); RW.d.date = f.date; RW.d.excluded = {}; RW.d.moved = {}; RW.d.fromCal = false; }  // termin z kalendarza minął — trzeba wybrać nowy
   if (RW.d.agenda && Date.now() - (RW.d.agenda.at || 0) > 5 * 3600e3) RW.d.agenda = null;
 }
 let reaT = null;
@@ -2266,7 +2266,9 @@ document.addEventListener('keydown', e => {
 
 async function submitRea() {
   if (RW.sending) return;
-  try { await ensureDays(reaTerms().map(t => t.date)); } catch (e) {}
+  RW.sending = true;
+  try { await ensureDays(reaTerms().map(t => t.date)); } catch (e) { RW.sending = false; toast('Nie udało się sprawdzić kalendarza studia: ' + e.message, 'bad'); return; }
+  RW.sending = false;
   for (let s = 0; s < RSTEPS - 1; s++) { const e = reaErrors(s); if (Object.keys(e).length) { RW.tried[s] = true; if (s === 0 || s === 3) RW.d.fromCal = false; RW.step = s; viewReaWizard(); toast(Object.values(e)[0], 'bad'); return; } }
   const d = RW.d, terms = reaTerms();
   const payload = {
@@ -2385,26 +2387,45 @@ function monthGrid(from, days) {
 // ---------- rezerwacja z kalendarza: zaznacz blok → nazwa → brief ----------
 
 const WK = { H0: 6, PX: 44 };
+// Mysz: przeciągnij, żeby zaznaczyć blok (krótki klik = godzina). Dotyk: przewijanie działa normalnie, stuknięcie = godzina od tego miejsca.
 function bindWeekSelect() {
-  const today = nowWaw().date;
+  const today = nowWaw().date, body = $('#cal .wk-body');
+  const minAt = (col, y) => { const r = col.getBoundingClientRect(); return Math.max(WK.H0 * 60, Math.min(24 * 60, Math.round(((y - r.top) / WK.PX * 60 + WK.H0 * 60) / 15) * 15)); };
+  const tapRange = m => { const s = Math.min(Math.floor(m / 30) * 30, 23 * 60); return [s, Math.min(24 * 60, s + 60)]; };
   $$('#cal .wk-col').forEach(col => {
     col.onpointerdown = e => {
       if (e.button !== 0 || e.target.closest('.wk-ev.link') || col.dataset.date < today) return;
+      const date = col.dataset.date, x0 = e.clientX, y0 = e.clientY;
+      if (e.pointerType === 'touch') {
+        col.onpointerup = ev => { col.onpointerup = null; if (Math.abs(ev.clientX - x0) < 8 && Math.abs(ev.clientY - y0) < 8) { const [s, en] = tapRange(minAt(col, ev.clientY)); openSlot(date, s, en, null); } };
+        return;
+      }
       e.preventDefault();
-      const r = col.getBoundingClientRect(), date = col.dataset.date;
-      const toMin = y => Math.max(WK.H0 * 60, Math.min(24 * 60, Math.round(((y - r.top) / WK.PX * 60 + WK.H0 * 60) / 15) * 15));
-      const a = toMin(e.clientY);
-      let b = a;
+      const a = minAt(col, e.clientY);
+      let b = a, moved = false, lastY = e.clientY, timer = null;
       const box = document.createElement('div');
       box.className = 'wk-sel';
       col.appendChild(box);
-      const range = () => { let s = Math.min(a, b), en = Math.max(a, b); if (en - s < 30) { s = Math.floor(a / 30) * 30; en = Math.min(24 * 60, s + 60); } return [s, en]; };
+      const range = () => {
+        if (!moved) return tapRange(a);
+        let s = Math.min(a, b), en = Math.max(a, b);
+        if (en - s < 15) en = Math.min(24 * 60, s + 15);
+        return [s, en];
+      };
       const draw = () => { const [s, en] = range(); box.style.top = (s - WK.H0 * 60) / 60 * WK.PX + 'px'; box.style.height = (en - s) / 60 * WK.PX + 'px'; box.textContent = minHm(s) + '–' + minHm(en); };
+      // Przy krawędzi przewijanej siatki przewijamy sami — pozycję liczymy zawsze z aktualnego położenia kolumny.
+      const edge = () => {
+        const br = body.getBoundingClientRect(), d = lastY < br.top + 30 ? -12 : lastY > br.bottom - 30 ? 12 : 0;
+        if (d) { body.scrollTop += d; b = minAt(col, lastY); draw(); }
+      };
       draw();
       try { col.setPointerCapture(e.pointerId); } catch (x) {}
-      col.onpointermove = ev => { b = toMin(ev.clientY); draw(); };
-      col.onpointerup = col.onpointercancel = () => {
+      timer = setInterval(edge, 40);
+      col.onpointermove = ev => { lastY = ev.clientY; if (Math.abs(ev.clientY - y0) > 4) moved = true; b = minAt(col, ev.clientY); draw(); };
+      col.onpointerup = col.onpointercancel = ev => {
+        clearInterval(timer);
         col.onpointermove = col.onpointerup = col.onpointercancel = null;
+        if (ev.type === 'pointercancel') { box.parentNode && box.parentNode.removeChild(box); return; }
         const [s, en] = range();
         openSlot(date, s, en, box);
       };
@@ -2444,15 +2465,20 @@ function openSlot(date, s, e, box) {
   $('#slotGo').onclick = go;
   inp.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); go(); } };  // ten Enter nie może dojść do kreatora
   $('#slotCancel').onclick = close;
-  ov.onclick = ev => { if (ev.target === ov) close(); };
+  let downOnOv = false;
+  ov.onpointerdown = ev => { downOnOv = ev.target === ov; };
+  ov.onclick = ev => { if (ev.target === ov && downOnOv) close(); };
 }
 
 // Kreator startuje od rodzaju realizacji: tytuł i termin są już wybrane w kalendarzu.
+// Istniejący szkic (rodzaj, brief) zostaje — podmieniamy tylko nazwę i termin.
 function startFromCal(date, s, e, name) {
-  const keepName = RW && RW.d ? RW.d.requesterName : null;
-  RW = { step: 1, d: Object.assign(REA_EMPTY(), { title: name, date, ready: minHm(s), start: minHm(s), end: minHm(e), fromCal: true }), tried: {}, sending: false, dir: 1 };
-  if (keepName) RW.d.requesterName = keepName;
-  saveRea();
+  if (!RW) loadRea();
+  const prev = RW && RW.d ? RW.d : REA_EMPTY();
+  RW = { step: 1, d: Object.assign({}, prev, { title: name, date, ready: minHm(s), start: minHm(s), end: minHm(e), teardownMin: prev.teardownMin || 0,
+    repeat: false, excluded: {}, moved: {}, conflictReason: '', fromCal: true }), tried: {}, sending: false, dir: 1 };
+  RW.d.rule = Object.assign({}, RW.d.rule, { weekdays: [dl_weekday(date)], day: Number(date.slice(8)), weekday: dl_weekday(date), dates: [] });
+  store.set('stz_rea', RW.d); store.set('stz_rea_step', 1);
   nav.push('/studio/nowa');
 }
 
