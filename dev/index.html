@@ -85,7 +85,8 @@ textarea.in{min-height:150px;resize:vertical;line-height:1.55}
 .in-xl{font-size:30px;font-weight:300;padding:18px 0;background:transparent;border:0;border-bottom:1px solid var(--line2);border-radius:0;letter-spacing:-.01em}
 .in-xl:focus{box-shadow:none;border-color:var(--acc)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.counter{font-size:12px;color:var(--dim);text-align:right;margin-top:6px}
+.counter{font-size:12px;color:var(--dim);text-align:right;margin-top:6px;transition:color .2s}
+.counter.ok{color:var(--ok)}
 input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 
 .chips{display:flex;flex-wrap:wrap;gap:8px;border:1px solid transparent;border-radius:14px}
@@ -1013,7 +1014,7 @@ function stepTitle() {
 function stepBrief() {
   const d = W.d;
   return `
-  ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Cel materiału, do kogo mówimy, kluczowy przekaz, CTA, orientacyjna długość, uwagi do montażu…">${esc(d.description)}</textarea><div class="counter"><span id="dCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
+  ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Cel materiału, do kogo mówimy, kluczowy przekaz, CTA, orientacyjna długość, uwagi do montażu…">${esc(d.description)}</textarea><div class="counter ${d.description.trim().length >= 40 ? 'ok' : ''}" id="dCountBox"><span id="dCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
   <div class="row2">
     ${fieldWrap('requesterName', 'Osoba zgłaszająca', `<input class="in" data-k="requesterName" value="${esc(d.requesterName)}" autocomplete="name">`)}
     ${fieldWrap('requesterEmail', 'E-mail', `<input class="in" value="${esc(B.user.email)}" readonly>`, { opt: false, hint: 'Z Twojego konta Google.' })}
@@ -1148,7 +1149,7 @@ function bindBody() {
       W.d[k] = k === 'workDays' ? Math.max(0, Math.round(Number(el.value) || 0)) : el.value;
       if (k === 'requesterName') store.set('stz_name', el.value);
       if (k === 'title') $('#tCount').textContent = el.value.length;
-      if (k === 'description') $('#dCount').textContent = el.value.trim().length;
+      if (k === 'description') { $('#dCount').textContent = el.value.trim().length; $('#dCountBox').classList.toggle('ok', el.value.trim().length >= 40); }
       if (k === 'tcText') { const tp = $('#tcPrev'); const tmp = document.createElement('div'); tmp.innerHTML = stepFiles(); tp.innerHTML = $('#tcPrev', tmp).innerHTML; }
       if (k === 'workDays') { const n = nowWaw(); if (W.d.workDays >= 1 && W.d.workDays <= 60) { $('#dueV').textContent = fmtDue(computeDeadline(n.date, n.hour, W.d.workDays, HOL, curCutoff()), true); } }
       saveDraft(); refreshWizard();
@@ -1971,7 +1972,7 @@ function rStepBrief() {
   const d = RW.d, k = d.kind, away = isAwayD(d), where = kindOf(k).where;
   const tech = where === 'location' ? [] : B.rea.tech;
   return `<div class="card">
-    ${rField('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Co realizujemy, kto występuje, agenda (godzina po godzinie), czego potrzebujesz od studia…">${esc(d.description)}</textarea>`)}
+    ${rField('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Co realizujemy, kto występuje, agenda (godzina po godzinie), czego potrzebujesz od studia…">${esc(d.description)}</textarea><div class="counter ${d.description.trim().length >= 40 ? 'ok' : ''}" id="rdCountBox"><span id="rdCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
     <div class="grid3">
       ${rField('requesterName', 'Osoba zgłaszająca', `<input class="in" data-k="requesterName" value="${esc(d.requesterName)}">`)}
       ${rField('email', 'E-mail', `<input class="in" value="${esc(B.user.email)}" disabled>`)}
@@ -2174,7 +2175,10 @@ function bindRea() {
 
 function bindReaBody() {
   const d = RW.d;
-  $$('#rBody [data-k]').forEach(i => i.oninput = () => { d[i.dataset.k] = i.value; if (i.dataset.k === 'requesterName') store.set('stz_name', i.value); saveRea(); if (RW.tried[RW.step]) markErrs(); syncNext(); });
+  $$('#rBody [data-k]').forEach(i => i.oninput = () => {
+    d[i.dataset.k] = i.value;
+    if (i.dataset.k === 'description' && $('#rdCount')) { const n = i.value.trim().length; $('#rdCount').textContent = n; $('#rdCountBox').classList.toggle('ok', n >= 40); }
+    if (i.dataset.k === 'requesterName') store.set('stz_name', i.value); saveRea(); if (RW.tried[RW.step]) markErrs(); syncNext(); });
   $$('#rBody [data-rc]').forEach(box => box.onclick = e => {
     const b = e.target.closest('[data-v]'); if (!b) return;
     const k = box.dataset.rc, v = b.dataset.v;

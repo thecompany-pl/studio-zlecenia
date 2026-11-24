@@ -245,7 +245,7 @@ function rStepBrief() {
   const d = RW.d, k = d.kind, away = isAwayD(d), where = kindOf(k).where;
   const tech = where === 'location' ? [] : B.rea.tech;
   return `<div class="card">
-    ${rField('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Co realizujemy, kto występuje, agenda (godzina po godzinie), czego potrzebujesz od studia…">${esc(d.description)}</textarea>`)}
+    ${rField('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Co realizujemy, kto występuje, agenda (godzina po godzinie), czego potrzebujesz od studia…">${esc(d.description)}</textarea><div class="counter ${d.description.trim().length >= 40 ? 'ok' : ''}" id="rdCountBox"><span id="rdCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
     <div class="grid3">
       ${rField('requesterName', 'Osoba zgłaszająca', `<input class="in" data-k="requesterName" value="${esc(d.requesterName)}">`)}
       ${rField('email', 'E-mail', `<input class="in" value="${esc(B.user.email)}" disabled>`)}
@@ -448,7 +448,10 @@ function bindRea() {
 
 function bindReaBody() {
   const d = RW.d;
-  $$('#rBody [data-k]').forEach(i => i.oninput = () => { d[i.dataset.k] = i.value; if (i.dataset.k === 'requesterName') store.set('stz_name', i.value); saveRea(); if (RW.tried[RW.step]) markErrs(); syncNext(); });
+  $$('#rBody [data-k]').forEach(i => i.oninput = () => {
+    d[i.dataset.k] = i.value;
+    if (i.dataset.k === 'description' && $('#rdCount')) { const n = i.value.trim().length; $('#rdCount').textContent = n; $('#rdCountBox').classList.toggle('ok', n >= 40); }
+    if (i.dataset.k === 'requesterName') store.set('stz_name', i.value); saveRea(); if (RW.tried[RW.step]) markErrs(); syncNext(); });
   $$('#rBody [data-rc]').forEach(box => box.onclick = e => {
     const b = e.target.closest('[data-v]'); if (!b) return;
     const k = box.dataset.rc, v = b.dataset.v;

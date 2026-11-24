@@ -282,7 +282,7 @@ function stepTitle() {
 function stepBrief() {
   const d = W.d;
   return `
-  ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Cel materiału, do kogo mówimy, kluczowy przekaz, CTA, orientacyjna długość, uwagi do montażu…">${esc(d.description)}</textarea><div class="counter"><span id="dCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
+  ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Cel materiału, do kogo mówimy, kluczowy przekaz, CTA, orientacyjna długość, uwagi do montażu…">${esc(d.description)}</textarea><div class="counter ${d.description.trim().length >= 40 ? 'ok' : ''}" id="dCountBox"><span id="dCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
   <div class="row2">
     ${fieldWrap('requesterName', 'Osoba zgłaszająca', `<input class="in" data-k="requesterName" value="${esc(d.requesterName)}" autocomplete="name">`)}
     ${fieldWrap('requesterEmail', 'E-mail', `<input class="in" value="${esc(B.user.email)}" readonly>`, { opt: false, hint: 'Z Twojego konta Google.' })}
@@ -417,7 +417,7 @@ function bindBody() {
       W.d[k] = k === 'workDays' ? Math.max(0, Math.round(Number(el.value) || 0)) : el.value;
       if (k === 'requesterName') store.set('stz_name', el.value);
       if (k === 'title') $('#tCount').textContent = el.value.length;
-      if (k === 'description') $('#dCount').textContent = el.value.trim().length;
+      if (k === 'description') { $('#dCount').textContent = el.value.trim().length; $('#dCountBox').classList.toggle('ok', el.value.trim().length >= 40); }
       if (k === 'tcText') { const tp = $('#tcPrev'); const tmp = document.createElement('div'); tmp.innerHTML = stepFiles(); tp.innerHTML = $('#tcPrev', tmp).innerHTML; }
       if (k === 'workDays') { const n = nowWaw(); if (W.d.workDays >= 1 && W.d.workDays <= 60) { $('#dueV').textContent = fmtDue(computeDeadline(n.date, n.hour, W.d.workDays, HOL, curCutoff()), true); } }
       saveDraft(); refreshWizard();
