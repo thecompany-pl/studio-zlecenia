@@ -69,9 +69,10 @@
   const evTitle = r => (r.kind === 'wyjazd' || r.location ? '[WYJAZD] ' : '[STD] ') + r.title;
   const busyOf = (date, skip) => {
     const show = me().role !== 'user' || canAppr();
-    const evs = CAL.filter(e => e.date === date && !(skip && e.termId === skip)).map(e => ({ start: e.start, end: e.end, label: show ? e.title : 'Zajęte', tentative: false, reaId: show ? (e.reaId || '') : '', termId: show ? (e.termId || '') : '' }));
+    const mineR = id => { const r = REAL.find(x => x.id === id); return !!(r && r.requesterEmail === ME); };
+    const evs = CAL.filter(e => e.date === date && !(skip && e.termId === skip)).map(e => { const v = show || (e.reaId && mineR(e.reaId)); return { start: e.start, end: e.end, label: v ? e.title : 'Zajęte', tentative: false, reaId: v ? (e.reaId || '') : '', termId: v ? (e.termId || '') : '', mine: !!(e.reaId && mineR(e.reaId)) }; });
     const tent = TERMS.filter(t => (t.status === 'Czeka' || t.status === 'Propozycja') && t.id !== skip).map(t => t.status === 'Propozycja' && t.proposed ? Object.assign({}, t, t.proposed) : t)
-      .filter(t => t.date === date).map(t => { const b = sr_block(t); return { start: sr_hm(b.from), end: sr_hm(b.to), label: show ? reaGet(t.realizationId).title + ' (czeka na akceptację)' : 'Wstępnie zajęte', tentative: true, reaId: show ? t.realizationId : '', termId: show ? t.id : '' }; });
+      .filter(t => t.date === date).map(t => { const b = sr_block(t); const v = show || mineR(t.realizationId); return { start: sr_hm(b.from), end: sr_hm(b.to), label: v ? reaGet(t.realizationId).title + ' (czeka na akceptację)' : 'Wstępnie zajęte', tentative: true, reaId: v ? t.realizationId : '', termId: v ? t.id : '', mine: mineR(t.realizationId) }; });
     return evs.concat(tent).sort((a, b) => a.start.localeCompare(b.start));
   };
   const kindL = k => ({ studio: 'Nagranie w studiu', avatar: 'Nagranie avatara', webinar: 'Webinar / szkolenie online', live: 'Transmisja live', wyjazd: 'Obsługa wyjazdowa' })[k] || k;

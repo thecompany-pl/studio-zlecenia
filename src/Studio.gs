@@ -50,7 +50,7 @@ function canSeeRea_(u, r) { return r.requesterEmail === u.email || isStudio_(u) 
 function canApprove_(u) { return canApproveAny_(u); }  // zgodność z getBootstrap
 
 function studioSettings_() {
-  return { manager: studioManager_(), canApprove: studioCanApprove_(), notifyNew: prop_('STUDIO_NOTIFY_NEW') === '1', location: prop_('STUDIO_LOCATION') || '' };
+  return { manager: studioManager_(), canApprove: studioCanApprove_(), notifyNew: prop_('STUDIO_NOTIFY_NEW') !== '0', location: prop_('STUDIO_LOCATION') || '' };
 }
 
 function saveStudioSettings(s) {
@@ -60,7 +60,7 @@ function saveStudioSettings(s) {
   var p = props_();
   p.setProperty('STUDIO_MANAGER', email);
   p.setProperty('STUDIO_CAN_APPROVE', s.canApprove ? '1' : '');
-  p.setProperty('STUDIO_NOTIFY_NEW', s.notifyNew ? '1' : '');
+  p.setProperty('STUDIO_NOTIFY_NEW', s.notifyNew ? '1' : '0');
   p.setProperty('STUDIO_LOCATION', String(s.location || '').trim().slice(0, 200));
   return getSettings();
 }
@@ -146,8 +146,10 @@ function busyMap_(dates, u, opts) {
   terms.forEach(function (t) {
     if (t.eventId) { eventTerm[t.eventId] = t; if (skip[t.id]) ownEvents[t.eventId] = true; }
   });
-  var titles = {};
-  if (showTitles) rows_('Realizacje').forEach(function (r) { titles[r.id] = r.title; });
+  // Zgłaszający widzi tytuły swoich realizacji (np. właśnie zgłoszony blok w kalendarzu), cudze — tylko „zajęte".
+  var info = {};
+  rows_('Realizacje').forEach(function (r) { info[r.id] = { title: r.title, mine: r.requesterEmail === u.email }; });
+  var see = function (reaId) { return showTitles || !!(info[reaId] && info[reaId].mine); };
   // Kalendarz: jedno zapytanie na ciągły zakres (do 120 dni), dłuższe serie — po dniu.
   var ranges = [];
   if (sr_daysDiff(sorted[0], sorted[sorted.length - 1]) <= 120) ranges.push([sorted[0], sorted[sorted.length - 1]]);
@@ -163,9 +165,9 @@ function busyMap_(dates, u, opts) {
         if (!out[d]) continue;
         var dayFrom = toDate_(d, 0), dayTo = toDate_(d, 1440);
         var from = all || s <= dayFrom ? '00:00' : hm_(s), to = all || en >= dayTo ? '24:00' : hm_(en);
-        var et = eventTerm[id];
-        out[d].push({ start: from, end: to, label: showTitles ? e.getTitle() : 'Zajęte', tentative: false,
-          reaId: showTitles && et ? et.realizationId : '', termId: showTitles && et ? et.id : '' });
+        var et = eventTerm[id], vis = showTitles || (et && see(et.realizationId));
+        out[d].push({ start: from, end: to, label: vis ? e.getTitle() : 'Zajęte', tentative: false,
+          reaId: vis && et ? et.realizationId : '', termId: vis && et ? et.id : '', mine: !!(et && info[et.realizationId] && info[et.realizationId].mine) });
       }
     });
   });
@@ -176,8 +178,9 @@ function busyMap_(dates, u, opts) {
     if (!out[x.date]) return;
     var b = sr_block(x);
     if (toDate_(x.date, b.from) <= now) return;  // minął bez decyzji — nie blokuje
-    out[x.date].push({ start: sr_hm(b.from), end: sr_hm(b.to), label: showTitles ? (titles[t.realizationId] || t.realizationId) + ' (czeka na akceptację)' : 'Wstępnie zajęte',
-      tentative: true, reaId: showTitles ? t.realizationId : '', termId: showTitles ? t.id : '' });
+    var vis = see(t.realizationId);
+    out[x.date].push({ start: sr_hm(b.from), end: sr_hm(b.to), label: vis ? ((info[t.realizationId] || {}).title || t.realizationId) + ' (czeka na akceptację)' : 'Wstępnie zajęte',
+      tentative: true, reaId: vis ? t.realizationId : '', termId: vis ? t.id : '', mine: !!(info[t.realizationId] && info[t.realizationId].mine) });
   });
   Object.keys(out).forEach(function (d) { out[d].sort(function (a, b) { return a.start.localeCompare(b.start); }); });
   return out;
@@ -204,8 +207,7 @@ function studioDays(dates) {
 
 // Widok kalendarza studia (tydzień / miesiąc).
 function studioRange(from, n) {
-  var u = me_();
-  if (!isStudio_(u) && !canApproveAny_(u)) throw new Error('Kalendarz studia jest dostępny dla zespołu studia.');
+  var u = me_();  // kalendarz widzą wszyscy; cudze tytuły tylko studio (busyMap_)
   n = Math.min(42, Math.max(1, Number(n) || 7));
   if (!sr_validDate(from)) throw new Error('Nieprawidłowa data.');
   var dates = [];
@@ -904,7 +906,7 @@ function sendReaSubmittedMail_(r, terms) {
 
 function sendReaApprovalMail_(r, terms) {
   var out = terms.some(function (t) { return t.outOfHours; });
-  var to = managerEmails_().concat(prop_('STUDIO_NOTIFY_NEW') === '1' ? studioEmails_() : []);
+  var to = managerEmails_().concat(prop_('STUDIO_NOTIFY_NEW') !== '0' ? studioEmails_() : []);  // domyślnie jak w montażu: całe studio
   var subj = 'Do akceptacji: ' + r.title + ' · ' + termWhen_(terms[0]).split(' (')[0] + (out ? ' · poza godzinami' : '') + (terms.length > 1 ? ' · seria ×' + terms.length : '');
   var warn = [];
   if (out) warn.push('część terminów wypada poza godzinami ' + SR_WORK[0] + ':00–' + SR_WORK[1] + ':00');

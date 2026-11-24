@@ -22,8 +22,7 @@ function kindOf(k) { return B.rea.kinds.find(x => x.key === k) || { label: k }; 
 function hs() { return dl_holidaySet(HOL); }
 
 function studioNavItems() {
-  const it = [['/studio/nowa', 'Nowa realizacja'], ['/studio/moje', 'Moje realizacje']];
-  if (isStudio() || B.canApproveRea) it.push(['/studio/kalendarz', 'Kalendarz studia']);
+  const it = [['/studio/kalendarz', 'Kalendarz studia'], ['/studio/nowa', 'Nowa realizacja'], ['/studio/moje', 'Moje realizacje']];
   if (B.canApproveRea) it.push(['/studio/akceptacja', 'Do akceptacji']);
   return it;
 }
@@ -34,12 +33,12 @@ function refreshReaCount() {
 }
 
 function renderStudio(r) {
-  if (r === '/studio') return nav.replace(B.canApproveRea && B.reaPending ? '/studio/akceptacja' : (isStudio() || B.canApproveRea) ? '/studio/kalendarz' : '/studio/nowa');
+  if (r === '/studio') return nav.replace('/studio/kalendarz');
   if (r === '/studio/nowa') return viewReaWizard();
   if (r === '/studio/gotowe') return nav.replace('/studio/moje');  // ekran sukcesu rysuje submitRea; po odświeżeniu go nie ma
   if (r === '/studio/moje') return viewReaList('mine');
   if (r === '/studio/akceptacja' && B.canApproveRea) return viewReaList('pending');
-  if (r === '/studio/kalendarz' && (isStudio() || B.canApproveRea)) return viewStudioCal();
+  if (r === '/studio/kalendarz') return viewStudioCal();
   const m = r.match(/^\/(realizacja|rezerwacja)\/(.+)$/);
   if (m) return viewRea(decodeURIComponent(m[2]));
   nav.replace('/studio/nowa');
@@ -183,10 +182,15 @@ function reaErrors(step) {
 }
 function needsDelivery(d) { return d.kind === 'studio' || d.kind === 'avatar' || d.kind === 'wyjazd' || d.tech.includes('Zapis całości'); }
 
+// Z kalendarza: kroki „Tytuł” i „Termin” są już za nami (wybrane zaznaczeniem bloku).
+function reaVisible() { return [0, 1, 2, 3, 4].filter(i => !(RW.d.fromCal && (i === 0 || i === 3))); }
+
 function viewReaWizard() {
   if (!RW) loadRea();
-  const s = RW.step;
-  setProg((s + 1) / RSTEPS);
+  const vis = reaVisible();
+  if (!vis.includes(RW.step)) RW.step = vis[0];
+  const s = RW.step, pos = vis.indexOf(s);
+  setProg((pos + 1) / vis.length);
   const heads = [
     ['Jak nazywa się realizacja?', 'Tak zobaczy ją studio w kalendarzu.'],
     ['Co realizujemy?', 'Od rodzaju zależy, o co zapytamy w briefie.'],
@@ -195,16 +199,16 @@ function viewReaWizard() {
     ['Sprawdź i wyślij', 'Zlecenie trafi do akceptacji. Dostaniesz maila z decyzją.']
   ];
   $('#app').innerHTML = `<section class="wiz view ${s === 3 ? 'wiz-wide' : ''}">
-    <div class="wiz-head"><div class="stepno"><b>${s + 1}</b> / ${RSTEPS}</div>${RW.d.title || RW.d.description ? '<button class="btn-t btn" id="rReset">Wyczyść szkic</button>' : ''}</div>
+    <div class="wiz-head"><div class="stepno"><b>${pos + 1}</b> / ${vis.length}${RW.d.fromCal ? ` <span class="dim">· ${esc(RW.d.title)} · ${esc(fmtDay(RW.d.date))} ${esc(RW.d.start)}–${esc(RW.d.end)}</span>` : ''}</div>${RW.d.title || RW.d.description ? '<button class="btn-t btn" id="rReset">Wyczyść szkic</button>' : ''}</div>
     <div class="${RW.dir > 0 ? 'slide-in' : 'slide-back'}">
       <div class="eyebrow">${['Tytuł', 'Rodzaj', 'Brief', 'Termin', 'Podsumowanie'][s]}</div>
       <h1 class="q">${heads[s][0]}</h1><p class="q-sub">${heads[s][1]}</p>
       <div id="rBody">${[rStepTitle, rStepKind, rStepBrief, rStepWhen, rStepSummary][s]()}</div>
     </div>
     <div class="wiz-foot">
-      <div>${s > 0 ? `<button class="btn btn-g" id="rBack">${ICON.back} Wstecz</button>` : '<span class="keys"><span class="kbd">Enter</span> dalej</span>'}</div>
+      <div>${pos > 0 ? `<button class="btn btn-g" id="rBack">${ICON.back} Wstecz</button>` : RW.d.fromCal ? `<button class="btn btn-g" id="rToCal">${ICON.back} Kalendarz</button>` : '<span class="keys"><span class="kbd">Enter</span> dalej</span>'}</div>
       <div style="display:flex;align-items:center;gap:16px">
-        ${s > 0 ? '<span class="keys"><span class="kbd">Esc</span> wstecz · <span class="kbd">Enter</span> dalej</span>' : ''}
+        ${pos > 0 ? '<span class="keys"><span class="kbd">Esc</span> wstecz · <span class="kbd">Enter</span> dalej</span>' : ''}
         ${s < RSTEPS - 1 ? `<button class="btn btn-p btn-lg ${Object.keys(reaErrors(s)).length ? 'is-off' : ''}" id="rNext" aria-disabled="${Object.keys(reaErrors(s)).length ? 'true' : 'false'}">Dalej</button>` : `<button class="btn btn-p btn-lg" id="rSend">${RW.sending ? '<span class="spin"></span> Wysyłam…' : 'Wyślij do akceptacji'}</button>`}
       </div></div></section>`;
   bindRea();
@@ -399,7 +403,7 @@ function rStepSummary() {
     ['Forma oddania', needsDelivery(d) ? d.delivery : ''], ['Agenda', [d.agenda && d.agenda.meta ? d.agenda.name : '', d.agendaText].filter(Boolean).join('\n')], ['Logo w tle', d.tech.includes('Tło z logo brandu') ? d.logoBrand : ''], ['Uwagi', d.notes], ['Uzasadnienie terminu', terms.some(t => termState(t).conflict) ? d.conflictReason : '']]
     .filter(x => x[1]);
   return `<div class="card sec"><dl class="kv">${kv.map(([a, b]) => `<dt>${esc(a)}</dt><dd style="white-space:pre-wrap">${esc(b)}</dd>`).join('')}</dl></div>
-    <div class="card"><div class="card-t">${terms.length > 1 ? `Seria · ${nTerms(terms.length)} · ${esc(sr_describe(d.rule))}` : 'Termin'}</div>
+    <div class="card"><div class="card-t" style="justify-content:space-between">${terms.length > 1 ? `Seria · ${nTerms(terms.length)} · ${esc(sr_describe(d.rule))}` : 'Termin'}<button class="btn-t btn" id="rChangeTerm" type="button">Zmień termin / dodaj gotowość lub serię</button></div>
       ${terms.map(t => { const st = termState(t); return `<div class="sr-row"><span class="sr-d">${esc(termLine(t))}${t.teardownMin ? ' · zwijanie ' + t.teardownMin + ' min' : ''}${t.travelMin ? ' · dojazd ' + t.travelMin + ' min' : ''}</span><span class="sr-s"><span class="dot ${st.cls}"></span>${esc(st.cls === 'ok' ? 'wolne' : st.cls === 'wait' ? 'poza godzinami' : st.cls === 'conf' ? 'kolizja' : st.txt)}</span></div>`; }).join('')}
     </div>`;
 }
@@ -421,6 +425,8 @@ function rerenderRea() {
 function bindRea() {
   $('#rNext') && ($('#rNext').onclick = () => reaStep(1));
   $('#rBack') && ($('#rBack').onclick = () => reaStep(-1));
+  $('#rToCal') && ($('#rToCal').onclick = () => nav.push('/studio/kalendarz'));
+  $('#rChangeTerm') && ($('#rChangeTerm').onclick = () => { RW.d.fromCal = false; RW.step = 3; RW.dir = -1; saveRea(); viewReaWizard(); });
   $('#rSend') && ($('#rSend').onclick = submitRea);
   $('#rReset') && ($('#rReset').onclick = e => {
     const btn = e.currentTarget;
@@ -516,13 +522,14 @@ function reaStep(dir) {
       toast(Object.values(e)[0], 'bad'); return;
     }
   }
-  if (dir < 0 && RW.step === 0) return;
-  RW.dir = dir; RW.step = Math.max(0, Math.min(RSTEPS - 1, RW.step + dir)); saveRea(); viewReaWizard(); window.scrollTo(0, 0);
+  const vis = reaVisible(), pos = vis.indexOf(RW.step);
+  if (pos + dir < 0 || pos + dir >= vis.length) return;
+  RW.dir = dir; RW.step = vis[pos + dir]; saveRea(); viewReaWizard(); window.scrollTo(0, 0);
 }
 
 document.addEventListener('keydown', e => {
   if (route !== '/studio/nowa' || !RW) return;
-  if (e.key === 'Escape' && RW.step > 0) { e.preventDefault(); reaStep(-1); }
+  if (e.key === 'Escape' && reaVisible().indexOf(RW.step) > 0) { e.preventDefault(); reaStep(-1); }
   if (e.key === 'Enter' && !e.shiftKey) {
     if (e.target.tagName === 'TEXTAREA' && !(e.metaKey || e.ctrlKey)) return;
     if (e.target.closest && (e.target.closest('button') || e.target.tagName === 'SELECT')) return;
@@ -534,7 +541,8 @@ document.addEventListener('keydown', e => {
 
 async function submitRea() {
   if (RW.sending) return;
-  for (let s = 0; s < RSTEPS - 1; s++) { const e = reaErrors(s); if (Object.keys(e).length) { RW.tried[s] = true; RW.step = s; viewReaWizard(); toast(Object.values(e)[0], 'bad'); return; } }
+  try { await ensureDays(reaTerms().map(t => t.date)); } catch (e) {}
+  for (let s = 0; s < RSTEPS - 1; s++) { const e = reaErrors(s); if (Object.keys(e).length) { RW.tried[s] = true; if (s === 0 || s === 3) RW.d.fromCal = false; RW.step = s; viewReaWizard(); toast(Object.values(e)[0], 'bad'); return; } }
   const d = RW.d, terms = reaTerms();
   const payload = {
     title: d.title, kind: d.kind, description: d.description, requesterName: d.requesterName, brand: d.brand, format: d.format, scope: d.scope, guests: d.guests,
@@ -547,7 +555,15 @@ async function submitRea() {
   RW.sending = true; viewReaWizard();
   try {
     const r = await api('createRealization', payload);
+    const fromCal = d.fromCal;
     store.del('stz_rea'); store.del('stz_rea_step'); RW = null; dropDays();
+    if (fromCal) {
+      CALV = { mode: 'week', anchor: terms[0].date }; store.set('stz_calv', CALV);
+      nav.push('/studio/kalendarz');
+      toast('Zgłoszone: ' + r.title + ' — czeka na akceptację studia. Dostaniesz maila z decyzją.', 'ok');
+      refreshReaCount();
+      return;
+    }
     google.script.history.push(null, null, '/studio/gotowe'); route = '/studio/gotowe'; renderTop();
     $('#app').innerHTML = `<section class="wiz view"><div class="done-ok"><span class="ok-dot">${ICON.check}</span></div><h1 class="q" style="text-align:center">Zlecenie czeka na akceptację</h1>
       <p class="q-sub" style="text-align:center">${esc(r.id)} · ${esc(r.title)}<br>Dostaniesz maila z decyzją albo propozycją terminu.</p>
@@ -594,7 +610,7 @@ async function viewStudioCal() {
   const from = week ? mondayOf(CALV.anchor) : mondayOf(CALV.anchor.slice(0, 8) + '01');
   const n = week ? 7 : 42;
   const label = week ? `${fmtDay(from)} – ${fmtDay(dl_addDays(from, 6))}` : ['styczeń', 'luty', 'marzec', 'kwiecień', 'maj', 'czerwiec', 'lipiec', 'sierpień', 'wrzesień', 'październik', 'listopad', 'grudzień'][Number(CALV.anchor.slice(5, 7)) - 1] + ' ' + CALV.anchor.slice(0, 4);
-  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Studio</div><h1 class="h1">Kalendarz studia</h1><p class="lead" style="margin:0">Kalendarz „Rezerwacja Studio Nagrań” i zlecenia czekające na akceptację.</p></div>
+  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Studio</div><h1 class="h1">Kalendarz studia</h1><p class="lead" style="margin:0">${week ? 'Zaznacz kursorem wolny blok czasu, żeby zgłosić realizację. Szare bloki są zajęte, kreskowane czekają na akceptację.' : 'Kliknij dzień, żeby przejść do tygodnia i zaznaczyć godziny.'}</p></div>
     <div class="cal-ctl"><button class="btn btn-g btn-sm" id="calPrev">${ICON.back}</button><span class="cal-l">${esc(label)}</span><button class="btn btn-g btn-sm" id="calNext" style="transform:scaleX(-1)">${ICON.back}</button>
     <button class="btn btn-g btn-sm" id="calToday">Dziś</button><div class="seg sm"><button class="${week ? 'on' : ''}" data-mode="week">Tydzień</button><button class="${!week ? 'on' : ''}" data-mode="month">Miesiąc</button></div></div></div>
     <div id="cal"><div class="sk-tile" style="height:520px"></div></div></section>`;
@@ -607,7 +623,9 @@ async function viewStudioCal() {
     Object.assign(DAYCACHE, days);
     $('#cal').innerHTML = week ? weekGrid(from, days) : monthGrid(from, days);
     $$('#cal [data-rea]').forEach(b => b.onclick = e => { e.stopPropagation(); nav.push('/realizacja/' + b.dataset.rea); });
+    $$('#cal [data-mday]').forEach(c => c.onclick = () => { CALV = { mode: 'week', anchor: c.dataset.mday }; store.set('stz_calv', CALV); viewStudioCal(); });
     const sc = $('#cal .wk-body'); if (sc) sc.scrollTop = 8 * 44 - 10;
+    if (week) bindWeekSelect();
   } catch (e) { $('#cal').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -618,25 +636,99 @@ function weekGrid(from, days) {
     const day = days[d] || { busy: [], workday: true };
     const ev = day.busy.map(b => {
       const top = Math.max(0, (hmMin(b.start) - H0 * 60) / 60 * PX), h = Math.max(18, (Math.min(H1 * 60, hmMin(b.end)) - Math.max(H0 * 60, hmMin(b.start))) / 60 * PX);
-      return `<div class="wk-ev ${b.tentative ? 'tent' : ''} ${b.reaId ? 'link' : ''}" style="top:${top}px;height:${h}px" ${b.reaId ? `data-rea="${esc(b.reaId)}"` : ''} title="${esc(b.start + '–' + b.end + ' · ' + b.label)}"><b>${esc(b.start)}–${esc(b.end)}</b> ${esc(b.label)}</div>`;
+      return `<div class="wk-ev ${b.tentative ? 'tent' : ''} ${b.reaId ? 'link' : ''} ${b.mine ? 'mine' : ''}" style="top:${top}px;height:${h}px" ${b.reaId ? `data-rea="${esc(b.reaId)}"` : ''} title="${esc(b.start + '–' + b.end + ' · ' + b.label)}"><b>${esc(b.start)}–${esc(b.end)}</b> ${esc(b.label)}</div>`;
     }).join('');
     const work = day.workday ? `<div class="wk-work" style="top:${(B.rea.work[0] - H0) * PX}px;height:${(B.rea.work[1] - B.rea.work[0]) * PX}px"></div>` : '';
-    return `<div class="wk-col ${d === today ? 'today' : ''} ${day.workday ? '' : 'off'}">${work}${ev}</div>`;
+    return `<div class="wk-col ${d === today ? 'today' : ''} ${day.workday ? '' : 'off'} ${d < today ? 'past' : ''}" data-date="${d}">${work}${ev}</div>`;
   }).join('');
   const heads = Array.from({ length: 7 }, (_, i) => dl_addDays(from, i)).map(d => `<div class="wk-hd ${d === today ? 'today' : ''}">${esc(fmtDay(d))}</div>`).join('');
   return `<div class="card wk"><div class="wk-heads"><div></div>${heads}</div><div class="wk-body"><div class="wk-grid" style="height:${(H1 - H0) * PX}px"><div class="wk-hours">${hours}</div>${cols}</div></div>
-    <div class="tl-legend" style="margin-top:10px"><span><i class="lg-work"></i>godziny pracy</span><span><i class="lg-busy"></i>w kalendarzu</span><span><i class="lg-tent"></i>czeka na akceptację</span></div></div>`;
+    <div class="tl-legend" style="margin-top:10px"><span><i class="lg-work"></i>godziny pracy</span><span><i class="lg-busy"></i>zajęte</span><span><i class="lg-tent"></i>czeka na akceptację</span><span><i class="lg-mine"></i>Twoje</span><span><i class="lg-sel"></i>zaznacz kursorem, żeby zgłosić</span></div></div>`;
 }
 
 function monthGrid(from, days) {
   const month = CALV.anchor.slice(0, 7), today = nowWaw().date;
   const cells = Array.from({ length: 42 }, (_, i) => dl_addDays(from, i)).map(d => {
     const day = days[d] || { busy: [] }, items = day.busy;
-    return `<div class="mo-c ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''} ${day.workday === false ? 'off' : ''}"><div class="mo-d">${Number(d.slice(8))}</div>
-      ${items.slice(0, 4).map(b => `<div class="mo-ev ${b.tentative ? 'tent' : ''} ${b.reaId ? 'link' : ''}" ${b.reaId ? `data-rea="${esc(b.reaId)}"` : ''} title="${esc(b.start + '–' + b.end + ' · ' + b.label)}">${esc(b.start)} ${esc(b.label)}</div>`).join('')}
+    return `<div class="mo-c ${d.slice(0, 7) !== month ? 'out' : ''} ${d === today ? 'today' : ''} ${day.workday === false ? 'off' : ''}" data-mday="${d}"><div class="mo-d">${Number(d.slice(8))}</div>
+      ${items.slice(0, 4).map(b => `<div class="mo-ev ${b.tentative ? 'tent' : ''} ${b.reaId ? 'link' : ''} ${b.mine ? 'mine' : ''}" ${b.reaId ? `data-rea="${esc(b.reaId)}"` : ''} title="${esc(b.start + '–' + b.end + ' · ' + b.label)}">${esc(b.start)} ${esc(b.label)}</div>`).join('')}
       ${items.length > 4 ? `<div class="mo-more">+${items.length - 4}</div>` : ''}</div>`;
   }).join('');
   return `<div class="card"><div class="mo-hd">${['pn', 'wt', 'śr', 'cz', 'pt', 'sb', 'nd'].map(x => `<span>${x}</span>`).join('')}</div><div class="mo">${cells}</div></div>`;
+}
+
+// ---------- rezerwacja z kalendarza: zaznacz blok → nazwa → brief ----------
+
+const WK = { H0: 6, PX: 44 };
+function bindWeekSelect() {
+  const today = nowWaw().date;
+  $$('#cal .wk-col').forEach(col => {
+    col.onpointerdown = e => {
+      if (e.button !== 0 || e.target.closest('.wk-ev.link') || col.dataset.date < today) return;
+      e.preventDefault();
+      const r = col.getBoundingClientRect(), date = col.dataset.date;
+      const toMin = y => Math.max(WK.H0 * 60, Math.min(24 * 60, Math.round(((y - r.top) / WK.PX * 60 + WK.H0 * 60) / 15) * 15));
+      const a = toMin(e.clientY);
+      let b = a;
+      const box = document.createElement('div');
+      box.className = 'wk-sel';
+      col.appendChild(box);
+      const range = () => { let s = Math.min(a, b), en = Math.max(a, b); if (en - s < 30) { s = Math.floor(a / 30) * 30; en = Math.min(24 * 60, s + 60); } return [s, en]; };
+      const draw = () => { const [s, en] = range(); box.style.top = (s - WK.H0 * 60) / 60 * WK.PX + 'px'; box.style.height = (en - s) / 60 * WK.PX + 'px'; box.textContent = minHm(s) + '–' + minHm(en); };
+      draw();
+      try { col.setPointerCapture(e.pointerId); } catch (x) {}
+      col.onpointermove = ev => { b = toMin(ev.clientY); draw(); };
+      col.onpointerup = col.onpointercancel = () => {
+        col.onpointermove = col.onpointerup = col.onpointercancel = null;
+        const [s, en] = range();
+        openSlot(date, s, en, box);
+      };
+    };
+  });
+}
+
+function slotTerm(date, s, e) { return { date, ready: minHm(s), start: minHm(s), end: minHm(e), teardownMin: 0, travelMin: 0 }; }
+
+function openSlot(date, s, e, box) {
+  const t = slotTerm(date, s, e), st = termState(t);
+  const close = () => { box && box.remove(); const ov = $('#slotOv'); ov && ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = ev => { if (ev.key === 'Escape') close(); };
+  if (st.cls === 'bad') { toast(st.txt, 'bad'); box && box.remove(); return; }
+  if (st.conflict) { toast('Ten czas jest już zajęty (' + st.txt.replace(/^Nachodzi na /, '') + '). Zaznacz wolny blok.', 'bad'); box && box.remove(); return; }
+  const ov = document.createElement('div');
+  ov.id = 'slotOv'; ov.className = 'slot-ov';
+  ov.innerHTML = `<div class="slot-card" role="dialog" aria-label="Nowa realizacja">
+    <div class="eyebrow">Nowa realizacja</div>
+    <div class="slot-when">${esc(fmtDay(date, true))}<br><b>${minHm(s)}–${minHm(e)}</b></div>
+    <div class="bk-state ${st.cls}" style="margin:0 0 16px">${esc(st.cls === 'ok' ? 'Wolne, w godzinach pracy.' : st.txt)}</div>
+    <label class="lbl" for="slotName">Nazwa realizacji <span class="req">*</span></label>
+    <input class="in" id="slotName" maxlength="255" autocomplete="off" placeholder="np. Webinar dla Gości BNI — grudzień">
+    <div class="hint">Dalej wypełnisz brief. Zgłoszenie trafi do akceptacji studia — godziny mogą zostać skorygowane.</div>
+    <div class="slot-act"><button class="btn btn-g" id="slotCancel">Anuluj</button><button class="btn btn-p" id="slotGo">Dalej: brief</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  document.addEventListener('keydown', onKey);
+  const inp = $('#slotName');
+  inp.focus();
+  const go = () => {
+    const name = inp.value.trim();
+    if (!name) { inp.closest('.slot-card').classList.add('shake'); inp.focus(); setTimeout(() => inp.closest('.slot-card').classList.remove('shake'), 400); return; }
+    close();
+    startFromCal(date, s, e, name);
+  };
+  $('#slotGo').onclick = go;
+  inp.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); go(); } };  // ten Enter nie może dojść do kreatora
+  $('#slotCancel').onclick = close;
+  ov.onclick = ev => { if (ev.target === ov) close(); };
+}
+
+// Kreator startuje od rodzaju realizacji: tytuł i termin są już wybrane w kalendarzu.
+function startFromCal(date, s, e, name) {
+  const keepName = RW && RW.d ? RW.d.requesterName : null;
+  RW = { step: 1, d: Object.assign(REA_EMPTY(), { title: name, date, ready: minHm(s), start: minHm(s), end: minHm(e), fromCal: true }), tried: {}, sending: false, dir: 1 };
+  if (keepName) RW.d.requesterName = keepName;
+  saveRea();
+  nav.push('/studio/nowa');
 }
 
 // ---------- strona zlecenia ----------
