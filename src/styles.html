@@ -438,6 +438,12 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .btn.is-off{opacity:.45;box-shadow:none}
 .row-axis{display:block;margin-top:8px;max-width:520px}
 
+/* przy węższym oknie menu schodzi do drugiego wiersza zamiast chować pozycje za krawędzią */
+@media (max-width:1320px){
+  .top{flex-wrap:wrap;row-gap:8px}
+  .nav{order:3;flex-basis:100%}
+  .me{margin-left:auto}
+}
 @media (max-width:900px){
   .start-grid,.checks{grid-template-columns:1fr}
   .strip{grid-template-columns:repeat(3,1fr)}
