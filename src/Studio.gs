@@ -700,8 +700,11 @@ function rejectTerms(id, termIds, reason) {
 }
 
 // termIds: lista albo 'all' (wszystkie przyszłe aktywne terminy).
-function cancelTerms(id, termIds) {
+function cancelTerms(id, termIds, reason) {
   var u = me_();
+  reason = String(reason || '').trim();
+  if (reason.length < 10) throw new Error('Podaj powód anulowania (min. 10 znaków).');
+  reason = reason.slice(0, 1000);
   var r, list = [], failed = [];
   withLock_(function () {
     r = reaForDecision_(id, u);
@@ -711,14 +714,14 @@ function cancelTerms(id, termIds) {
       if (termIds !== 'all' && (!Array.isArray(termIds) || termIds.indexOf(t.id) < 0)) return;
       if ([TERM.pending, TERM.proposal, TERM.ok].indexOf(t.status) < 0 || toDate_(t.date, sr_block(t).from) <= now) return;
       if (!deleteTermEvent_(t)) { failed.push(t.date); return; }
-      update_('Terminy', t._row, { status: TERM.cancelled, eventId: '', proposed: '', decidedBy: u.name, decidedAt: nowIso_() });
+      update_('Terminy', t._row, { status: TERM.cancelled, eventId: '', proposed: '', decidedBy: u.name, decidedAt: nowIso_(), decisionNote: reason });
       list.push(t);
     });
     if (!list.length && !failed.length) throw new Error('Nie ma przyszłych terminów do anulowania.');
-    if (list.length) log_(r.id, u.email, 'Anulowanie', list.map(function (t) { return t.date; }).join(', '));
+    if (list.length) log_(r.id, u.email, 'Anulowanie', list.map(function (t) { return t.date; }).join(', ') + ' · powód: ' + reason);
     refreshStatus_(r);
   });
-  if (list.length) sendReaCancelledMail_(r, list, u);
+  if (list.length) sendReaCancelledMail_(r, list, u, reason);
   if (failed.length) throw new Error('Nie udało się usunąć wydarzenia z kalendarza (' + failed.join(', ') + ') — spróbuj ponownie za chwilę.');
   return getRealization(r.id);
 }
@@ -1053,10 +1056,11 @@ function sendReaRejectedMail_(r, list, reason, u) {
       [['Zlecenie', r.id], ['Odrzucone', termsHtml_(list, false)]], ['Zobacz zlecenie', reaLink_(r.id)]), u.email);
 }
 
-function sendReaCancelledMail_(r, list, u) {
+function sendReaCancelledMail_(r, list, u, reason) {
   var to = uniq_([r.requesterEmail].concat(managerEmails_(), json_(r.assignees, []).map(function (a) { return a.email; }))).filter(function (e) { return e !== u.email; });
   send_(r.id, to, [], 'Anulowane: ' + r.title + ' · ' + termWhen_(list[0]).split(' (')[0] + (list.length > 1 ? ' i ' + (list.length - 1) + ' więcej' : ''),
-    mailHtml_('Realizacja anulowana', '<b>' + esc_(u.name) + '</b> anulował(a) ' + (list.length > 1 ? list.length + ' terminy' : 'termin') + ' „' + esc_(r.title) + '". Sloty w kalendarzu studia są wolne.',
+    mailHtml_('Realizacja anulowana', '<b>' + esc_(u.name) + '</b> anulował(a) ' + (list.length > 1 ? list.length + ' terminy' : 'termin') + ' „' + esc_(r.title) + '". Sloty w kalendarzu studia są wolne.' +
+      (reason ? ' Powód:<br><br><div style="padding:12px 14px;border-radius:10px;background:#f6f6f8;color:#16161a;white-space:pre-wrap">' + esc_(reason) + '</div>' : ''),
       [['Zlecenie', r.id], ['Anulowane', termsHtml_(list, false)]], ['Otwórz zlecenie', reaLink_(r.id)]));
 }
 
