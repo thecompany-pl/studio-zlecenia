@@ -28,7 +28,7 @@ function kindOf(k) { return B.rea.kinds.find(x => x.key === k) || { label: k }; 
 function hs() { return dl_holidaySet(HOL); }
 
 function studioNavItems() {
-  const it = [['/studio/kalendarz', 'Kalendarz studia'], ['/studio/nowa', 'Nowa realizacja'], ['/studio/moje', 'Moje realizacje']];
+  const it = [['/studio/kalendarz', 'Kalendarz studia'], ['/studio/nowa', 'Nowa realizacja'], ['/studio/moje', 'Moje zlecenia']];
   if (B.canApproveRea) it.push(['/studio/akceptacja', 'Do akceptacji']);
   return it;
 }
@@ -72,7 +72,7 @@ async function ensureDays(dates) {
     Object.assign(DAYCACHE, res);
   }
 }
-function dropDays() { Object.keys(DAYCACHE).forEach(k => delete DAYCACHE[k]); }
+function dropDays() { Object.keys(DAYCACHE).forEach(k => delete DAYCACHE[k]); if (typeof RANGEC !== 'undefined') Object.keys(RANGEC).forEach(k => delete RANGEC[k]); }
 
 // Stan terminu: kolor + tekst. t: { date, ready, start, end, teardownMin, travelMin }
 function termState(t, skipTermId) {
@@ -590,7 +590,7 @@ async function submitRea() {
 // ---------- listy ----------
 
 async function viewReaList(scope) {
-  const titles = { mine: ['Twoje', 'Moje realizacje', 'Zlecenia studyjne, które zgłosiłeś(-aś).'], pending: ['Zarządzanie', 'Do akceptacji', 'Zlecenia czekające na decyzję — od najbliższego terminu.'] }[scope];
+  const titles = { mine: ['Twoje', 'Moje zlecenia', 'Zgłoszone przez Ciebie terminy realizacji. Serie są zgrupowane — rozwiń, żeby zobaczyć każdy termin.'], pending: ['Zarządzanie', 'Do akceptacji', 'Zlecenia czekające na decyzję — od najbliższego terminu.'] }[scope];
   $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">${titles[0]}</div><h1 class="h1">${titles[1]}</h1><p class="lead" style="margin:0">${titles[2]}</p></div>
     <button class="btn btn-p" data-go="/studio/nowa">Nowa realizacja</button></div><div id="reaList">${skeleton(2)}</div></section>`;
   try {
@@ -598,9 +598,24 @@ async function viewReaList(scope) {
     if (scope === 'pending') { B.reaPending = list.length; renderTop(); }
     list.sort((a, b) => scope === 'pending' ? ((a.next || {}).date || '9').localeCompare((b.next || {}).date || '9') : String(b.createdAt).localeCompare(String(a.createdAt)));
     if (scope === 'pending') { try { await ensureDays([...new Set(list.filter(r => r.next).map(r => r.next.date))]); } catch (e) {} }
-    $('#reaList').innerHTML = list.length ? `<div class="card">${list.map(r => reaRow(r, scope === 'pending')).join('')}</div>`
-      : `<div class="empty"><div class="h">${scope === 'pending' ? 'Nic nie czeka na akceptację' : 'Nie masz jeszcze zleceń studyjnych'}</div>${scope === 'pending' ? 'Nowe zgłoszenia pojawią się tutaj.' : 'Zgłoś nagranie, webinar albo transmisję — zajmie Ci to kilka minut.'}</div>`;
+    const open = r => [RS().pending, RS().ok, RS().proposal].includes(r.status);
+    if (scope === 'mine') list.sort((a, b) => open(a) !== open(b) ? (open(a) ? -1 : 1) : open(a) ? ((a.next || {}).date || '9').localeCompare((b.next || {}).date || '9') : String(b.createdAt).localeCompare(String(a.createdAt)));
+    const act = list.filter(open), rest = list.filter(r => !open(r));
+    $('#reaList').innerHTML = !list.length ? '' : scope === 'mine'
+      ? (act.length ? `<div class="card-t" style="margin:4px 0 10px">W toku · ${act.length}</div><div class="card">${act.map(reaGroup).join('')}</div>` : '') +
+        (rest.length ? `<div class="card-t" style="margin:22px 0 10px">Zakończone i anulowane · ${rest.length}</div><div class="card">${rest.map(reaGroup).join('')}</div>` : '')
+      : `<div class="card">${list.map(r => reaRow(r, scope === 'pending')).join('')}</div>`;
+    if (!list.length) $('#reaList').innerHTML = `<div class="empty"><div class="h">${scope === 'pending' ? 'Nic nie czeka na akceptację' : 'Nie masz jeszcze zleceń studyjnych'}</div>${scope === 'pending' ? 'Nowe zgłoszenia pojawią się tutaj.' : 'Zgłoś nagranie, webinar albo transmisję — zajmie Ci to kilka minut.'}</div>`;
   } catch (e) { $('#reaList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// Seria w „Moich zleceniach”: wiersz realizacji + rozwijana lista wszystkich terminów.
+function reaGroup(r) {
+  const ts = r.termsLite || [], today = nowWaw().date;
+  if (ts.length <= 1) return reaRow(r, false);
+  const ahead = ts.filter(t => t.date >= today && ![TS().cancelled, TS().rejected].includes(t.status)).length;
+  return `<div class="sg">${reaRow(r, false)}<details class="sg-d"><summary>Wszystkie terminy · ${ts.length}${ahead ? ` <span class="dim">(${ahead} przed nami)</span>` : ''}</summary>
+    <div class="sg-l">${ts.map(t => `<div class="sg-t${t.date < today ? ' past' : ''}"><span>${esc(fmtDay(t.date, true))}</span><span class="dim">${esc(t.start)}–${esc(t.end)}</span>${reaPill(t.status)}</div>`).join('')}</div></details></div>`;
 }
 
 function reaBadges(r) {
@@ -633,15 +648,45 @@ async function viewStudioCal() {
   $('#calPrev').onclick = () => move(-1); $('#calNext').onclick = () => move(1);
   $('#calToday').onclick = () => { CALV.anchor = nowWaw().date; store.set('stz_calv', CALV); viewStudioCal(); };
   $$('[data-mode]').forEach(b => b.onclick = () => { CALV.mode = b.dataset.mode; store.set('stz_calv', CALV); viewStudioCal(); });
-  try {
-    const days = await api('studioRange', from, n);
+  const key = from + '|' + n, token = CALSEQ = (CALSEQ || 0) + 1;
+  let shown = '';
+  const paint = days => {
+    if (token !== CALSEQ || !$('#cal')) return;  // użytkownik przeszedł już dalej
+    const sig = JSON.stringify(days);
+    if (sig === shown) return;
+    const prev = $('#cal .wk-body'), keep = prev && shown ? prev.scrollTop : null;
+    if ($('#cal .wk-sel')) return;  // trwa zaznaczanie — nie podmieniamy siatki pod kursorem
+    shown = sig;
     Object.assign(DAYCACHE, days);
     $('#cal').innerHTML = week ? weekGrid(from, days) : monthGrid(from, days);
     $$('#cal [data-rea]').forEach(b => b.onclick = e => { e.stopPropagation(); nav.push('/realizacja/' + b.dataset.rea); });
     $$('#cal [data-mday]').forEach(c => c.onclick = () => { CALV = { mode: 'week', anchor: c.dataset.mday }; store.set('stz_calv', CALV); viewStudioCal(); });
-    const sc = $('#cal .wk-body'); if (sc) sc.scrollTop = 8 * 44 - 10;
+    const sc = $('#cal .wk-body'); if (sc) sc.scrollTop = keep !== null ? keep : 8 * 44 - 10;
     if (week) bindWeekSelect();
-  } catch (e) { $('#cal').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  };
+  const hit = RANGEC[key];
+  if (hit && Date.now() - hit.at < 10 * 60e3) paint(hit.days);
+  try {
+    paint(await rangeFetch(from, n, !!hit));
+    // Następny i poprzedni widok w tle — przełączanie strzałkami bez czekania.
+    const nb = week ? [dl_addDays(from, 7), dl_addDays(from, -7)] : [mondayOf(nextMonth(CALV.anchor, 1)), mondayOf(nextMonth(CALV.anchor, -1))];
+    setTimeout(() => nb.forEach(f => { if (!RANGEC[f + '|' + n] || Date.now() - RANGEC[f + '|' + n].at > 60e3) rangeFetch(f, n).catch(() => {}); }), 300);
+  } catch (e) { if (!hit) $('#cal').innerHTML = `<div class="empty">${esc(e.message)}</div>`; else toast('Nie udało się odświeżyć kalendarza: ' + e.message, 'bad'); }
+}
+
+// Pamięć widoków kalendarza (zakres → dni). Pokazujemy od razu, a świeże dane dociągamy w tle.
+const RANGEC = {}, RANGEP = {};
+let CALSEQ = 0;
+function rangeFetch(from, n, force) {
+  const key = from + '|' + n;
+  if (RANGEP[key] && !force) return RANGEP[key];
+  const p = RANGEP[key] = api('studioRange', from, n).then(days => { RANGEC[key] = { at: Date.now(), days }; return days; }).finally(() => { if (RANGEP[key] === p) delete RANGEP[key]; });
+  return p;
+}
+function nextMonth(anchor, k) {
+  let y = Number(anchor.slice(0, 4)), m = Number(anchor.slice(5, 7)) + k;
+  if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; }
+  return y + '-' + String(m).padStart(2, '0') + '-01';
 }
 
 function weekGrid(from, days) {
@@ -864,13 +909,13 @@ function drawRea(p) {
     : p.status === RS().rejected ? `<div class="card sec rej-banner"><span class="rej-dot">${ICON.x}</span><div><div class="w5">Odrzucone</div><div class="rej-why">${esc((p.terms.find(t => t.decisionNote) || {}).decisionNote || '')}</div></div></div>`
     : p.status === RS().cancelled ? `<div class="card sec"><div class="w5">Anulowane</div></div>` : '';
   $('#app').innerHTML = `<section class="view">
-    <button class="back" data-go="${p.can.studio || p.can.approveAny ? (appr ? '/studio/akceptacja' : '/studio/kalendarz') : '/studio/moje'}">${ICON.back} ${p.can.studio || p.can.approveAny ? (appr ? 'Do akceptacji' : 'Kalendarz studia') : 'Moje realizacje'}</button>
+    <button class="back" data-go="${p.can.studio || p.can.approveAny ? (appr ? '/studio/akceptacja' : '/studio/kalendarz') : '/studio/moje'}">${ICON.back} ${p.can.studio || p.can.approveAny ? (appr ? 'Do akceptacji' : 'Kalendarz studia') : 'Moje zlecenia'}</button>
     <div class="bk-head"><div class="eyebrow">${esc(p.id)} · ${esc(p.kindLabel)}</div><h1 class="h1" style="margin:4px 0 10px">${esc(p.title)}</h1>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">${reaPill(p.status)}<span class="badges">${reaBadges(p)}</span></div></div>
     <div class="pgrid"><div>${banner}
       ${calNotes.length ? `<div class="card sec bk-wait"><div class="w5">Termin zmieniony w kalendarzu</div>${calNotes.map(t => `<div class="muted" style="font-size:13px">${esc(t.calChanged)}</div>`).join('')}</div>` : ''}
       <div class="card sec"><div class="card-t">${p.terms.length > 1 ? `Terminy · ${p.terms.length}` : 'Termin'}</div>${termsHtml}</div>
-      <div class="card sec"><div class="card-t">Opis</div><div class="brief">${esc(p.description)}</div></div>
+      ${RCUR.editing && p.can.edit ? editCard(p) : `<div class="card sec"><div class="card-t" style="display:flex;justify-content:space-between;align-items:center;gap:10px">Opis${p.can.edit ? `<button class="btn btn-g btn-sm" id="reOpen">Edytuj szczegóły</button>` : ''}</div><div class="brief">${esc(p.description)}</div></div>`}
       <div class="card sec"><dl class="kv">${kv.map(([a, b]) => `<dt>${esc(a)}</dt><dd>${b}</dd>`).join('')}</dl>
         ${p.tech.length ? `<div class="card-t" style="margin-top:18px">Wymagania techniczne</div><ul class="tech">${p.tech.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
         ${p.agendaText ? `<div class="card-t" style="margin-top:18px">Agenda</div><div class="brief" style="font-size:14px">${esc(p.agendaText)}</div>` : ''}
@@ -887,6 +932,23 @@ function drawRea(p) {
   if (appr) { const ds = p.terms.filter(t => t.canApprove).map(t => editedTerm(p, t).date); if (ds.some(d => !DAYCACHE[d])) ensureDays(ds).then(() => { if (route.startsWith('/realizacja/') || route.startsWith('/rezerwacja/')) drawRea(p); }).catch(() => {}); }
 }
 
+function editCard(p) {
+  const away = p.kind === 'wyjazd' || !!p.location, n = p.description.trim().length;
+  const f = (k, label, v, opts) => `<label class="lbl" style="margin-top:14px">${label}</label>` + (opts && opts.area
+    ? `<textarea class="in" data-re="${k}" style="min-height:${opts.h || 90}px" maxlength="${opts.max || 4000}">${esc(v || '')}</textarea>`
+    : `<input class="in" data-re="${k}" value="${esc(v || '')}" maxlength="${(opts && opts.max) || 500}">`);
+  return `<div class="card sec" id="reEdit"><div class="card-t">Edycja szczegółów</div>
+    ${f('title', 'Tytuł realizacji', p.title, { max: 255 })}
+    ${f('description', 'Opis', p.description, { area: true, h: 140 })}<div class="counter ${n >= 40 ? 'ok' : ''}" id="reCountBox"><span id="reCount">${n}</span> znaków · min. 40</div>
+    ${p.kind === 'webinar' || p.kind === 'live' ? f('platform', 'Platforma', p.platform, { max: 80 }) : ''}
+    ${f('meetingLink', 'Link do spotkania', p.meetingLink)}
+    ${away ? f('location', 'Lokalizacja', p.location, { max: 300 }) + `<label class="lbl" style="margin-top:14px">Miejsce parkingowe</label><select class="sel" data-re="parking">${['Tak', 'Nie'].map(x => `<option ${p.parking === x ? 'selected' : ''}>${x}</option>`).join('')}</select>` : ''}
+    ${f('agendaText', 'Agenda', p.agendaText, { area: true, h: 110 })}
+    ${f('notes', 'Uwagi', p.notes, { area: true, max: 2000 })}
+    <div class="hint">Zmiany trafią do wydarzeń w kalendarzu studia, a druga strona dostanie maila. Godzin tu nie zmienisz — napisz o tym w komentarzu.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn btn-g btn-sm" id="reCancel">Anuluj</button><button class="btn btn-p btn-sm" id="reSave">Zapisz zmiany</button></div></div>`;
+}
+
 function bindReaPage(p) {
   const act = async (btn, fn, ok) => {
     const sel = btn.tagName === 'SELECT', old = btn.innerHTML;
@@ -894,6 +956,17 @@ function bindReaPage(p) {
     try { const np = await fn(); if (ok) toast(ok, 'ok'); dropDays(); RCUR = { id: np.id, edits: {}, sel: {}, ui: {} }; drawRea(np); refreshReaCount(); }
     catch (e) { toast(e.message, 'bad'); btn.disabled = false; if (!sel) btn.innerHTML = old; else drawRea(p); }
   };
+  $('#reOpen') && ($('#reOpen').onclick = () => { RCUR.editing = true; drawRea(p); const el = $('#reEdit'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); });
+  $('#reCancel') && ($('#reCancel').onclick = () => { RCUR.editing = false; drawRea(p); });
+  const reDesc = $('#reEdit [data-re="description"]');
+  if (reDesc) reDesc.oninput = () => { const n = reDesc.value.trim().length; $('#reCount').textContent = n; $('#reCountBox').classList.toggle('ok', n >= 40); };
+  $('#reSave') && ($('#reSave').onclick = e => {
+    const patch = {};
+    $$('#reEdit [data-re]').forEach(i => { patch[i.dataset.re] = i.value; });
+    if (String(patch.description || '').trim().length < 40) return toast('Opis musi mieć co najmniej 40 znaków.', 'bad');
+    if (!String(patch.title || '').trim()) return toast('Podaj tytuł realizacji.', 'bad');
+    act(e.currentTarget, () => api('updateReaDetails', p.id, patch), 'Szczegóły zapisane.');
+  });
   const selected = () => p.terms.filter(t => t.canApprove && RCUR.sel[t.id]);
   const items = () => selected().map(t => { const e = editedTerm(p, t); return { id: t.id, date: e.date, ready: e.ready, start: e.start, end: e.end, teardownMin: e.teardownMin, travelMin: e.travelMin }; });
   $$('[data-sel]').forEach(c => c.onchange = () => { RCUR.sel[c.dataset.sel] = c.checked; drawRea(p); });

@@ -320,6 +320,15 @@ input[type=date].in,input[type=datetime-local].in{color-scheme:light}
 .bk-row{display:flex;align-items:center;gap:16px;width:100%;text-align:left;padding:12px 4px;border-bottom:1px solid var(--line);transition:.15s}
 .bk-row:last-child{border-bottom:0}
 .bk-row:hover{background:var(--card2)}
+.sg{border-bottom:1px solid var(--line)}
+.sg:last-child{border-bottom:0}
+.sg .bk-row{border-bottom:0}
+.sg-d{margin:0 4px 12px 4px}
+.sg-d summary{cursor:pointer;font-size:13px;color:var(--mut);padding:4px 0;list-style-position:inside}
+.sg-l{display:grid;gap:2px;margin-top:6px}
+.sg-t{display:grid;grid-template-columns:minmax(150px,1fr) 110px auto;gap:12px;align-items:center;padding:6px 10px;border-radius:8px;background:var(--card2);font-size:13.5px}
+.sg-t.past{opacity:.55}
+@media(max-width:600px){.sg-t{grid-template-columns:1fr auto}.sg-t .dim{grid-column:1}}
 .bk-d{display:flex;flex-direction:column;min-width:86px;font-size:12.5px;color:var(--mut)}
 .bk-d b{font-size:16px;color:var(--tx)}
 .bk-m{flex:1;min-width:0;display:flex;flex-direction:column;font-size:12.5px}

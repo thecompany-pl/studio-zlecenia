@@ -86,7 +86,7 @@
     out.terms = terms.map(t => Object.assign({}, t, { hasEvent: !!t.eventId, canApprove: (t.status === 'Czeka' || t.status === 'Propozycja') && (isMgr() || (!t.outOfHours && studio && STS.canApprove)),
       canCancel: ['Czeka', 'Propozycja', 'Zaakceptowany'].includes(t.status) && (r.requesterEmail === ME || studio || canAppr()) }));
     out.comments = (COMMENTS[r.id] || []); out.linkedMontage = r.linkedMontage || []; out.agendaText = r.agendaText || ''; out.logoBrand = r.logoBrand || ''; out.holdOpen = !!r.holdOpen; out.history = HIST[r.id] || [{ ts: r.createdAt, actor: r.requesterEmail, action: 'Zgłoszenie realizacji', details: '' }];
-    out.can = { approve: out.terms.some(t => t.canApprove), approveAny: canAppr(), manager: isMgr(), studio, acceptProposal: r.requesterEmail === ME && terms.some(t => t.status === 'Propozycja'), reopen: isMgr() && reaSt(terms) === 'Zaakceptowane' && !!r.holdOpen,
+    out.can = { edit: ['Czeka na akceptację', 'Zaakceptowane', 'Propozycja terminu'].includes(reaSt(terms)) && (r.requesterEmail === ME || studio || canAppr()), approve: out.terms.some(t => t.canApprove), approveAny: canAppr(), manager: isMgr(), studio, acceptProposal: r.requesterEmail === ME && terms.some(t => t.status === 'Propozycja'), reopen: isMgr() && reaSt(terms) === 'Zaakceptowane' && !!r.holdOpen,
       claim: studio && live && !mine && r.assignees.length < r.staffNeeded, release: studio && mine && live, staff: canAppr() && live, montage: studio || r.requesterEmail === ME };
     return out;
   };
@@ -105,7 +105,15 @@
       const id = addRea(Object.assign({}, p, { requesterEmail: ME, agendaFile: p.agendaFile ? { id: p.agendaFile.id, name: p.agendaFile.name, size: p.agendaFile.size } : null }), terms);
       return reaOut(reaGet(id), true);
     },
-    listRealizations: scope => REAL.filter(r => scope === 'pending' ? canAppr() && ['Czeka na akceptację', 'Propozycja terminu'].includes(reaSt(tOf(r.id))) : scope === 'all' ? true : r.requesterEmail === ME).map(r => reaOut(r, false)),
+    listRealizations: scope => REAL.filter(r => scope === 'pending' ? canAppr() && ['Czeka na akceptację', 'Propozycja terminu'].includes(reaSt(tOf(r.id))) : scope === 'all' ? true : r.requesterEmail === ME).map(r => Object.assign(reaOut(r, false), scope === 'mine' ? { termsLite: tOf(r.id).map(t => ({ date: t.date, start: t.start, end: t.end, status: t.status })) } : {})),
+    updateReaDetails: (id, patch) => {
+      const r = reaGet(id);
+      if (String(patch.description || '').trim().length < 40) throw new Error('Popraw: opis (min. 40 znaków).');
+      const ch = Object.keys(patch).filter(k => String(patch[k]).trim() !== String(r[k] || '').trim());
+      ch.forEach(k => { r[k] = String(patch[k]).trim(); });
+      if (ch.length) hist(id, 'Zmiana szczegółów', ch.join(', '));
+      return reaOut(r, true);
+    },
     getRealization: id => reaOut(reaGet(id), true),
     approveTerms: (id, items, opts) => {
       const r = reaGet(id);

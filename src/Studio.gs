@@ -150,23 +150,24 @@ function busyMap_(dates, u, opts) {
   var info = {};
   rows_('Realizacje').forEach(function (r) { info[r.id] = { title: r.title, mine: r.requesterEmail === u.email }; });
   var see = function (reaId) { return showTitles || !!(info[reaId] && info[reaId].mine); };
-  // Kalendarz: jedno zapytanie na ciągły zakres (do 120 dni), dłuższe serie — po dniu.
+  // Kalendarz: jedno zapytanie na okno do 120 dni (długie serie dzielimy na kilka okien).
   var ranges = [];
-  if (sr_daysDiff(sorted[0], sorted[sorted.length - 1]) <= 120) ranges.push([sorted[0], sorted[sorted.length - 1]]);
-  else sorted.forEach(function (d) { ranges.push([d, d]); });
-  var cal = studioCal_();
+  sorted.forEach(function (d) {
+    var last = ranges[ranges.length - 1];
+    if (last && sr_daysDiff(last[0], d) <= 120) last[1] = d; else ranges.push([d, d]);
+  });
   ranges.forEach(function (rg) {
-    cal.getEvents(toDate_(rg[0], 0), toDate_(rg[1], 1440)).forEach(function (e) {
-      var id = e.getId();
+    calEvents_(rg[0], rg[1]).forEach(function (e) {
+      var id = e[0];
       if (ownEvents[id]) return;
-      var s = e.getStartTime(), en = e.getEndTime(), all = e.isAllDayEvent();
+      var s = new Date(e[1]), en = new Date(e[2]), all = !!e[3];
       var first = ymd_(s) < rg[0] ? rg[0] : ymd_(s);
       for (var d = first; d <= rg[1] && d <= ymd_(new Date(en.getTime() - 1)); d = dl_addDays(d, 1)) {
         if (!out[d]) continue;
         var dayFrom = toDate_(d, 0), dayTo = toDate_(d, 1440);
         var from = all || s <= dayFrom ? '00:00' : hm_(s), to = all || en >= dayTo ? '24:00' : hm_(en);
         var et = eventTerm[id], vis = showTitles || (et && see(et.realizationId));
-        out[d].push({ start: from, end: to, label: vis ? e.getTitle() : 'Zajęte', tentative: false,
+        out[d].push({ start: from, end: to, label: vis ? e[4] : 'Zajęte', tentative: false,
           reaId: vis && et ? et.realizationId : '', termId: vis && et ? et.id : '', mine: !!(et && info[et.realizationId] && info[et.realizationId].mine) });
       }
     });
@@ -184,6 +185,50 @@ function busyMap_(dates, u, opts) {
   });
   Object.keys(out).forEach(function (d) { out[d].sort(function (a, b) { return a.start.localeCompare(b.start); }); });
   return out;
+}
+
+// Wydarzenia kalendarza studia w zakresie dni jako [id, startMs, endMs, całodniowe, tytuł].
+// Calendar REST jednym zapytaniem (CalendarApp robi osobne wywołanie na każdy getter każdego wydarzenia) + cache na 90 s.
+// Cache unieważnia bumpCal_() przy każdej zmianie wydarzeń przez portal; zmiany zrobione ręcznie w Google widać najpóźniej po 90 s.
+function calEvents_(a, b) {
+  var cache = CacheService.getScriptCache(), key = 'ev:' + (cache.get('calVer') || '0') + ':' + a + ':' + b;
+  var hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  var list = null;
+  if (!cache.get('calRestOff')) {
+    try { list = calEventsRest_(a, b); } catch (e) { cache.put('calRestOff', String(e.message).slice(0, 200), 21600); }
+  }
+  if (!list) list = calEventsApp_(a, b);
+  try { cache.put(key, JSON.stringify(list), 90); } catch (e) {}  // za duże na cache — trudno
+  return list;
+}
+function bumpCal_() { try { CacheService.getScriptCache().put('calVer', String(Date.now()), 21600); } catch (e) {} }
+
+function calEventsRest_(a, b) {
+  var calId = prop_('STUDIO_CAL_ID') || studioCal_().getId(), out = [], page = '';
+  var base = 'https:' + '/'.repeat(2) + 'www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(calId) + '/events?singleEvents=true&maxResults=2500' +
+    '&timeMin=' + encodeURIComponent(toDate_(a, 0).toISOString()) + '&timeMax=' + encodeURIComponent(toDate_(b, 1440).toISOString()) +
+    '&fields=' + encodeURIComponent('nextPageToken,items(iCalUID,summary,start,end,status)');
+  for (var guard = 0; guard < 10; guard++) {
+    var res = UrlFetchApp.fetch(base + (page ? '&pageToken=' + encodeURIComponent(page) : ''), { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) throw new Error('Calendar API ' + res.getResponseCode() + ': ' + res.getContentText().slice(0, 150));
+    var j = JSON.parse(res.getContentText());
+    (j.items || []).forEach(function (e) {
+      if (e.status === 'cancelled' || !e.start || !e.end) return;
+      var all = !!e.start.date;
+      var st = all ? toDate_(e.start.date, 0) : new Date(e.start.dateTime), en = all ? toDate_(e.end.date, 0) : new Date(e.end.dateTime);
+      out.push([e.iCalUID, st.getTime(), en.getTime(), all ? 1 : 0, e.summary || '']);
+    });
+    page = j.nextPageToken;
+    if (!page) return out;
+  }
+  return out;
+}
+
+function calEventsApp_(a, b) {
+  return studioCal_().getEvents(toDate_(a, 0), toDate_(b, 1440)).map(function (e) {
+    return [e.getId(), e.getStartTime().getTime(), e.getEndTime().getTime(), e.isAllDayEvent() ? 1 : 0, e.getTitle()];
+  });
 }
 
 function checkDates_(dates, max) {
@@ -386,6 +431,7 @@ function reaOut_(r, terms, u, full) {
     approve: out.terms.some(function (t) { return t.canApprove; }),
     approveAny: canAny, manager: isManager_(u), studio: studio,
     acceptProposal: r.requesterEmail === u.email && terms.some(function (t) { return t.status === TERM.proposal; }),
+    edit: live && (r.requesterEmail === u.email || studio || canAny),
     claim: studio && live && !mine && assignees.length < out.staffNeeded,
     release: studio && mine && live,
     staff: canAny && live,
@@ -414,7 +460,9 @@ function listRealizations(scope) {
     return r.requesterEmail === u.email;
   }).map(function (r) {
     var terms = (by[r.id] || []).sort(function (a, b) { return (a.date + a.ready).localeCompare(b.date + b.ready); });
-    return reaOut_(r, terms, u, false);
+    var o = reaOut_(r, terms, u, false);
+    if (scope !== 'pending' && scope !== 'all') o.termsLite = terms.map(function (t) { return { date: t.date, start: t.start, end: t.end, status: t.status }; });
+    return o;
   });
 }
 
@@ -441,7 +489,8 @@ function eventDesc_(r, t) {
     ['Parking', r.parking], ['Forma oddania', r.delivery], ['Zgoda Zarządu TC', r.boardConsent], ['Brand', r.brand],
     ['Zgłasza', r.requesterName + ' (' + r.requesterEmail + ')'], ['Uwagi', r.notes]]
     .forEach(function (x) { if (x[1]) lines.push(x[0] + ': ' + x[1]); });
-  lines.push('', 'Zlecenie ' + r.id + ': ' + reaLink_(r.id));
+  lines.push('', 'Zlecenie ' + r.id + ': ' + reaLink_(r.id),
+    'Pod tym linkiem edytujesz szczegóły realizacji (tytuł, opis, agenda, link do spotkania, lokalizacja, uwagi) — zmiany trafią też do tego wydarzenia. Zmianę godzin ustal w komentarzu pod zleceniem.');
   return lines.join('\n');
 }
 
@@ -451,6 +500,7 @@ function eventGuests_(r) {
 
 function createTermEvent_(r, t) {
   var b = sr_block(t);
+  bumpCal_();
   var ev = studioCal_().createEvent(eventTitle_(r), toDate_(t.date, b.from), toDate_(t.date, b.to), {
     description: eventDesc_(r, t), location: r.location || prop_('STUDIO_LOCATION') || '', guests: eventGuests_(r), sendInvites: true
   });
@@ -460,6 +510,7 @@ function createTermEvent_(r, t) {
 // true = wydarzenia już nie ma (usunięte albo nie istniało); false = błąd kalendarza, spróbuj później.
 function deleteTermEvent_(t) {
   if (!t.eventId) return true;
+  bumpCal_();
   try { var ev = studioCal_().getEventById(t.eventId); if (ev) ev.deleteEvent(); return true; } catch (e) { return false; }
 }
 
@@ -758,6 +809,56 @@ function isStudioSide_(email) {
   return (a && isStudio_({ role: String(a.role) })) || (!!studioManager_() && email === studioManager_());
 }
 
+var REA_EDITABLE = [['title', 'tytuł'], ['description', 'opis'], ['agendaText', 'agenda'], ['meetingLink', 'link do spotkania'], ['platform', 'platforma'],
+  ['location', 'lokalizacja'], ['parking', 'parking'], ['notes', 'uwagi']];
+
+// Zgłaszający i studio poprawiają szczegóły (bez godzin — te idą przez akceptację). Przyszłe wydarzenia w kalendarzu dostają nowy tytuł/opis/miejsce.
+function updateReaDetails(id, patch) {
+  var u = me_();
+  patch = patch || {};
+  return withLock_(function () {
+    var r = findRea_(id);
+    if (!r || !canSeeRea_(u, r)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
+    if ([REA.pending, REA.ok, REA.proposal].indexOf(r.status) < 0) throw new Error('To zlecenie jest zamknięte — nie można już zmienić szczegółów.');
+    var away = !!String(r.location || '').trim() || r.kind === 'wyjazd';
+    var allowed = { title: 1, description: 1, agendaText: 1, meetingLink: 1, notes: 1, platform: r.kind === 'webinar' || r.kind === 'live', location: away, parking: away };
+    var next = {}, changed = [];
+    REA_EDITABLE.forEach(function (x) {
+      var k = x[0];
+      if (!allowed[k] || patch[k] === undefined || patch[k] === null) return;
+      var v = String(patch[k]).trim();
+      if (v !== String(r[k] || '').trim()) { next[k] = v; changed.push(x[1]); }
+    });
+    if (!changed.length) return getRealization(r.id);
+    var m = Object.assign({}, r, next), err = [];
+    if (!String(m.title).trim() || String(m.title).length > 255) err.push('tytuł');
+    if (String(m.description || '').trim().length < 40) err.push('opis (min. 40 znaków)');
+    if (String(m.agendaText || '').length > 4000) err.push('agenda (maks. 4000 znaków)');
+    if (String(m.meetingLink || '').length > 500) err.push('link do spotkania (maks. 500 znaków)');
+    if (String(m.notes || '').length > 2000) err.push('uwagi (maks. 2000 znaków)');
+    if (allowed.platform && (!String(m.platform || '').trim() || String(m.platform).length > 80)) err.push('platforma');
+    if (allowed.location && (!String(m.location || '').trim() || String(m.location).length > 300)) err.push('lokalizacja');
+    if (allowed.parking && ['Tak', 'Nie'].indexOf(m.parking) < 0) err.push('miejsce parkingowe');
+    if (err.length) throw new Error('Popraw: ' + err.join(', ') + '.');
+    next.updatedAt = nowIso_();
+    update_('Realizacje', r._row, next);
+    var now = new Date(), cal = null, failed = 0;
+    termsOf_(r.id).forEach(function (t) {
+      if (!t.eventId || t.status !== TERM.ok || toDate_(t.date, sr_block(t).to) < now) return;
+      try {
+        cal = cal || studioCal_();
+        var ev = cal.getEventById(t.eventId);
+        if (!ev) return;
+        ev.setTitle(eventTitle_(m)); ev.setDescription(eventDesc_(m, t)); ev.setLocation(m.location || prop_('STUDIO_LOCATION') || '');
+      } catch (e) { failed++; }
+    });
+    bumpCal_();
+    log_(r.id, u.email, 'Zmiana szczegółów', changed.join(', ') + (failed ? ' · nie udało się zaktualizować ' + failed + ' wydarzeń' : ''));
+    sendReaEditedMail_(m, changed, u);
+    return getRealization(r.id);
+  });
+}
+
 function addReaComment_(id, text, u) {
   var r = findRea_(id);
   if (!r || !canSeeRea_(u, r)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
@@ -781,7 +882,7 @@ function dailyStudio() {
   if (active && active !== owner) requireAdmin_();
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(1000)) return;
-  try { dailyStudio_(); } finally { lock.releaseLock(); }
+  try { dailyStudio_(); bumpCal_(); } finally { lock.releaseLock(); }
 }
 
 function dailyStudio_() {
@@ -928,7 +1029,8 @@ function sendReaApprovedMail_(r, done, u) {
   var changed = done.some(function (t) { return t.before; });
   send_(r.id, [r.requesterEmail], json_(r.assignees, []).map(function (a) { return a.email; }), 'Zaakceptowane: ' + r.title + ' · ' + termWhen_(done[0]).split(' (')[0] + (done.length > 1 ? ' i ' + (done.length - 1) + ' więcej' : ''),
     mailHtml_('Studio potwierdza realizację', '<b>' + esc_(u.name) + '</b> zaakceptował(a) „' + esc_(r.title) + '". ' + (changed ? 'Godziny zostały skorygowane — sprawdź „było → jest". ' : '') +
-      'Termin jest w kalendarzu studia, zaproszenie przyjdzie osobno.', reaRows_(r, done), ['Zobacz zlecenie', reaLink_(r.id)]), u.email);
+      'Termin jest w kalendarzu studia, zaproszenie przyjdzie osobno.<br><br>Pod linkiem do zlecenia (jest też w opisie wydarzenia w kalendarzu) możesz <b>edytować szczegóły</b>: tytuł, opis, agendę, link do spotkania, lokalizację i uwagi. Zmiany od razu trafią do wydarzenia. Zmianę godzin ustal ze studiem w komentarzu pod zleceniem.',
+      reaRows_(r, done), ['Zobacz lub edytuj zlecenie', reaLink_(r.id)]), u.email);
 }
 
 function sendReaProposalMail_(r, list, comment, u) {
@@ -962,6 +1064,16 @@ function sendReaStaffAlertMail_(r, t, a) {
   send_(r.id, managerEmails_(), [], 'Brak obsady: ' + r.title + ' · ' + termWhen_(t).split(' (')[0],
     mailHtml_('Brakuje obsady realizacji', '„' + esc_(r.title) + '" ma ' + a.length + ' z ' + (Number(r.staffNeeded) || 1) + ' potrzebnych osób, a termin jest za 2 dni robocze lub wcześniej.',
       [['Zlecenie', r.id], ['Termin', '<b>' + termWhen_(t) + '</b>'], ['Obsada', a.length ? esc_(a.map(function (x) { return x.name; }).join(', ')) : 'nikt']], ['Otwórz zlecenie', reaLink_(r.id)]));
+}
+
+function sendReaEditedMail_(r, changed, u) {
+  var byRequester = u.email === r.requesterEmail;
+  var to = byRequester ? json_(r.assignees, []).map(function (a) { return a.email; }).concat(managerEmails_()) : [r.requesterEmail];
+  to = uniq_(to).filter(function (e) { return e && e !== u.email; });
+  if (!to.length) return;
+  send_(r.id, to, [], 'Zmiana szczegółów: ' + r.title,
+    mailHtml_('Zmienione szczegóły realizacji', '<b>' + esc_(u.name) + '</b> zmienił(a) w „' + esc_(r.title) + '": ' + esc_(changed.join(', ')) + '. Wydarzenia w kalendarzu studia są zaktualizowane.',
+      [['Zlecenie', r.id]], ['Zobacz zlecenie', reaLink_(r.id)]), u.email);
 }
 
 function sendReaCommentMail_(r, text, u) {
