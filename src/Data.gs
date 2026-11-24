@@ -22,18 +22,27 @@ var ss__ = null;
 function ss_() { return ss__ || (ss__ = SpreadsheetApp.openById(prop_('SHEET_ID'))); }
 function sh_(name) { return ss_().getSheetByName(name); }
 
+// Godzina z arkusza w dowolnej postaci → 'HH:MM': tekst ('9:00', "'10:00", '10:00:00'), ułamek doby (0.4166…), pusta → ''.
+function hmCell_(x) {
+  if (x === '' || x === null || x === undefined) return '';
+  if (typeof x === 'number') { var m = Math.round(x * 1440) % 1440; return ('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2); }
+  var s = String(x).replace(/^'/, '').trim(), r = /^(\d{1,2}):(\d{2})/.exec(s);
+  return r ? ('0' + r[1]).slice(-2) + ':' + r[2] : s;
+}
+
 // Sheets potrafi zamienić tekst '12:00' / '2026-11-26' na czas / datę. Datę oddajemy jako 'yyyy-MM-dd',
 // a samą godzinę (Date z roku 1899) — tak, jak ją widać w arkuszu ('12:00'), bez przeliczeń stref.
 function rows_(name) {
   var rng = sh_(name).getDataRange();
   var v = rng.getValues(), disp = null;
   var h = v.shift() || [];
-  return v.filter(function (r) { return r.join('') !== ''; }).map(function (r, i) {
-    var o = { _row: i + 2 };
+  v.forEach(function (r, i) { r._i = i; });
+  return v.filter(function (r) { return r.join('') !== ''; }).map(function (r) {
+    var i = r._i, o = { _row: i + 2 };
     h.forEach(function (k, j) {
       var x = r[j];
       if (x instanceof Date) {
-        if (x.getFullYear() < 1901) { disp = disp || rng.getDisplayValues(); x = String(disp[i + 1][j]).slice(0, 5); }
+        if (x.getFullYear() < 1901) { disp = disp || rng.getDisplayValues(); x = hmCell_(disp[r._i + 1][j]); }
         else x = Utilities.formatDate(x, TZ, 'yyyy-MM-dd');
       }
       o[k] = x;
@@ -46,7 +55,6 @@ function rows_(name) {
 function cell_(v) {
   if (v === undefined || v === null) return '';
   if (typeof v === 'string' && /^[=+\-@]/.test(v)) return "'" + v;
-  if (typeof v === 'string' && /^\d{1,2}:\d{2}$/.test(v)) return "'" + v;  // godzina zostaje tekstem
   return v;
 }
 

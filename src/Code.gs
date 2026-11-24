@@ -79,13 +79,26 @@ function migrate_() {
       }
     });
   });
-  ['ready', 'start', 'end'].forEach(function (k) {  // godziny w Terminy zawsze jako tekst
-    var col = SHEETS.Terminy.indexOf(k) + 1, sh = sh_('Terminy');
-    if (sh && col > 0) sh.getRange(2, col, sh.getMaxRows() - 1, 1).setNumberFormat('@');
-  });
+  fixTermTimes_();
   migrateRezerwacje_();
   try { ensureStudioTrigger_(); } catch (e) {}  // bez zgody na wyzwalacze — włączy je autoryzujKalendarz()
   props_().setProperty('SCHEMA', SCHEMA_VERSION);
+}
+
+// Godziny w Terminy jako tekst 'HH:MM': najpierw odczyt tego, co widać (Sheets mógł je zamienić na czas), potem format '@' i zapis.
+function fixTermTimes_() {
+  var sh = sh_('Terminy');
+  if (!sh) return;
+  var n = sh.getLastRow() - 1;
+  ['ready', 'start', 'end'].forEach(function (k) {
+    var col = SHEETS.Terminy.indexOf(k) + 1;
+    if (col < 1) return;
+    var all = sh.getRange(2, col, sh.getMaxRows() - 1, 1);
+    var vals = n > 0 ? sh.getRange(2, col, n, 1).getValues() : [], disp = n > 0 ? sh.getRange(2, col, n, 1).getDisplayValues() : [];
+    var fixed = vals.map(function (row, i) { return [row[0] instanceof Date ? hmCell_(disp[i][0]) : hmCell_(row[0])]; });
+    all.setNumberFormat('@');
+    if (n > 0) sh.getRange(2, col, n, 1).setValues(fixed);
+  });
 }
 
 function setup() {

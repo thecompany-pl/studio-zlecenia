@@ -98,7 +98,7 @@ function termsOf_(id) {
     .sort(function (a, b) { return (a.date + a.ready).localeCompare(b.date + b.ready); });
 }
 function normTerm_(t) {
-  t.date = String(t.date); t.ready = String(t.ready); t.start = String(t.start); t.end = String(t.end);
+  t.date = String(t.date); t.ready = hmCell_(t.ready); t.start = hmCell_(t.start); t.end = hmCell_(t.end);
   t.teardownMin = Number(t.teardownMin) || 0; t.travelMin = Number(t.travelMin) || 0;
   t.outOfHours = t.outOfHours === true || t.outOfHours === 'TRUE' || t.outOfHours === 'true' || t.outOfHours === '1';
   t.proposed = json_(t.proposed, null); t.before = json_(t.before, null);
@@ -520,10 +520,10 @@ function commitTerms_(r, picked, u, extraPatch) {
     var evId = '';
     try {
       evId = createTermEvent_(r, x.t);
-      var changed = ['date', 'ready', 'start', 'end'].some(function (k) { return x.t[k] !== x.old[k]; });
+      var changed = ['date', 'ready', 'start', 'end', 'teardownMin', 'travelMin'].some(function (k) { return String(x.t[k]) !== String(x.old[k]); });
       update_('Terminy', x.old._row, Object.assign({ date: x.t.date, ready: x.t.ready, start: x.t.start, end: x.t.end, status: TERM.ok, eventId: evId,
         teardownMin: x.t.teardownMin, travelMin: x.t.travelMin, outOfHours: x.t.outOfHours ? '1' : '', conflict: '', proposed: '',
-        before: changed ? JSON.stringify({ date: x.old.date, ready: x.old.ready, start: x.old.start, end: x.old.end }) : '' }, extraPatch(x)));
+        before: changed ? JSON.stringify({ date: x.old.date, ready: x.old.ready, start: x.old.start, end: x.old.end, teardownMin: x.old.teardownMin, travelMin: x.old.travelMin }) : '' }, extraPatch(x)));
       done.push(Object.assign({}, x.t, { before: changed ? x.old : null }));
     } catch (e) {
       if (evId) deleteTermEvent_({ eventId: evId });
@@ -880,9 +880,12 @@ function autoryzujKalendarz() {
 function reaLink_(id) { return appUrl_() + '?r=' + encodeURIComponent(id); }
 
 function termWhen_(t) {
-  var d = String(t.date).split('-');
+  var d = String(t.date).split('-'), x = [];
+  if (t.ready && t.ready !== t.start) x.push('gotowość ' + t.ready);
+  if (Number(t.travelMin)) x.push('dojazd ' + t.travelMin + ' min');
+  if (Number(t.teardownMin)) x.push('zwijanie ' + t.teardownMin + ' min');
   return ['niedziela', 'poniedziałek', 'wtorek', 'środa', 'czwartek', 'piątek', 'sobota'][dl_weekday(String(t.date))] + ' ' + d[2] + '.' + d[1] + '.' + d[0] +
-    ', ' + t.start + '–' + t.end + (t.ready !== t.start ? ' (gotowość ' + t.ready + ')' : '');
+    ', ' + t.start + '–' + t.end + (x.length ? ' (' + x.join(', ') + ')' : '');
 }
 function termsHtml_(list, withBefore) {
   return list.map(function (t) {

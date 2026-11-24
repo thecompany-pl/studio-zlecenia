@@ -1738,7 +1738,13 @@ function hmMin(hm) { return sr_min(hm); }
 function nTerms(n) { return n + ' ' + (n === 1 ? 'termin' : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'terminy' : 'terminów'); }
 function minHm(n) { return sr_hm(n); }
 function fmtDay(ymd, long) { const [y, m, d] = ymd.split('-'); return (long ? DAYS_LONG : DAYS)[dl_weekday(ymd)] + ' ' + d + '.' + m + (long ? '.' + y : ''); }
-function termLine(t) { return fmtDay(t.date, true) + ', ' + t.start + '–' + t.end + (t.ready && t.ready !== t.start ? ' · gotowość ' + t.ready : ''); }
+function termLine(t) {
+  const x = [];
+  if (t.ready && t.ready !== t.start) x.push('gotowość ' + t.ready);
+  if (Number(t.travelMin)) x.push('dojazd ' + t.travelMin + ' min');
+  if (Number(t.teardownMin)) x.push('zwijanie ' + t.teardownMin + ' min');
+  return fmtDay(t.date, true) + ', ' + t.start + '–' + t.end + (x.length ? ' · ' + x.join(' · ') : '');
+}
 function reaPill(s) {
   const c = s === RS().ok || s === TS().ok ? 'ok' : s === RS().pending || s === TS().pending ? 'wait' : s === RS().proposal || s === TS().proposal ? 'prop' : s === RS().done ? 'done' : 'off';
   return `<span class="bk-pill ${c}">${esc(s)}</span>`;
@@ -1849,6 +1855,7 @@ function loadRea() {
   RW.d.rule = Object.assign(REA_EMPTY().rule, (s && s.rule) || {});
   if (RW.d.date < nowWaw().date) { const f = REA_EMPTY(); RW.d.date = f.date; RW.d.excluded = {}; RW.d.moved = {}; RW.d.fromCal = false; }  // termin z kalendarza minął — trzeba wybrać nowy
   if (RW.d.agenda && Date.now() - (RW.d.agenda.at || 0) > 5 * 3600e3) RW.d.agenda = null;
+  RW.d.ready = RW.d.start; RW.d.teardownMin = 0; RW.d.travelMin = 0;  // te pola ustala studio
 }
 let reaT = null;
 function saveRea() { clearTimeout(reaT); reaT = setTimeout(() => { store.set('stz_rea', RW.d); store.set('stz_rea_step', RW.step); }, 250); }
@@ -2132,7 +2139,7 @@ function rStepSummary() {
     .filter(x => x[1]);
   return `<div class="card sec"><dl class="kv">${kv.map(([a, b]) => `<dt>${esc(a)}</dt><dd style="white-space:pre-wrap">${esc(b)}</dd>`).join('')}</dl></div>
     ${conflict && d.fromCal ? conflictBox() : ''}
-    <div class="card" style="margin-top:16px"><div class="card-t" style="justify-content:space-between">${terms.length > 1 ? `Seria · ${nTerms(terms.length)} · ${esc(sr_describe(d.rule))}` : 'Termin'}<button class="btn-t btn" id="rChangeTerm" type="button">Zmień termin / dodaj gotowość lub serię</button></div>
+    <div class="card" style="margin-top:16px"><div class="card-t" style="justify-content:space-between">${terms.length > 1 ? `Seria · ${nTerms(terms.length)} · ${esc(sr_describe(d.rule))}` : 'Termin'}<button class="btn-t btn" id="rChangeTerm" type="button">Zmień termin / ustaw serię</button></div>
       ${terms.map(t => { const st = termState(t); return `<div class="sr-row"><span class="sr-d">${esc(termLine(t))}</span><span class="sr-s"><span class="dot ${st.cls}"></span>${esc(st.cls === 'ok' ? 'wolne' : st.cls === 'wait' ? 'poza godzinami' : st.cls === 'conf' ? 'kolizja' : st.txt)}</span></div>`; }).join('')}
     </div>`;
 }
@@ -2194,8 +2201,8 @@ function bindReaBody() {
   if (ax) ax.onclick = e => {
     const r = ax.getBoundingClientRect(), F = 7, T = 22;
     const m = Math.round(((e.clientX - r.left) / r.width * (T - F) * 60 + F * 60) / 15) * 15;
-    const len = hmMin(d.end) - hmMin(d.start), lead = hmMin(d.start) - hmMin(d.ready);
-    d.start = minHm(Math.max(B.rea.day[0] * 60 + lead, Math.min(m, 24 * 60 - len))); d.end = minHm(hmMin(d.start) + len); d.ready = minHm(hmMin(d.start) - lead);
+    const len = hmMin(d.end) - hmMin(d.start);
+    d.start = minHm(Math.max(B.rea.day[0] * 60, Math.min(m, 24 * 60 - len))); d.end = minHm(hmMin(d.start) + len); d.ready = d.start;
     saveRea(); rerenderRea();
   };
   $('#rRepeat') && ($('#rRepeat').onchange = e => { d.repeat = e.target.checked; saveRea(); rerenderRea(); loadWhenDays(); });
