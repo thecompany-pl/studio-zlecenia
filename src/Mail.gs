@@ -115,6 +115,26 @@ function sendRevisionMail_(r, rev, u) {
       rev.n >= MAX_REVISIONS ? 'To była ostatnia przysługująca tura poprawek.' : ''), u.email);
 }
 
+function sendCommentMail_(r, text, u, fromStudio) {
+  var box = '<div style="padding:12px 14px;border-radius:10px;background:#f6f6f8;color:#16161a;white-space:pre-wrap">' + esc_(text) + '</div>';
+  var intro = '<b>' + esc_(u.name) + '</b> dodał(a) komentarz do „' + esc_(r.title) + '":<br><br>' + box;
+  if (fromStudio) {
+    send_(r.id, [r.requesterEmail], [r.ownerEmail], 'Komentarz: ' + r.title,
+      mailHtml_('Nowy komentarz od studia', intro, [['Zlecenie', r.id]], ['Odpowiedz w portalu', guestLink_(r)]), u.email);
+  } else {
+    send_(r.id, [r.assigneeEmail || studioEmails_()[0]], [], 'Komentarz: ' + r.title,
+      mailHtml_('Nowy komentarz od zgłaszającego', intro, [['Zlecenie', r.id], ['Zgłasza', esc_(r.requesterName) + ' · ' + esc_(r.requesterEmail)]],
+        ['Odpowiedz w portalu', projectLink_(r.id)]), u.email);
+  }
+}
+
+function sendRejectedMail_(r, u) {
+  send_(r.id, [r.requesterEmail], [r.ownerEmail], 'Odrzucone: ' + r.title,
+    mailHtml_('Zlecenie odrzucone', '<b>' + esc_(u.name) + '</b> ze studia odrzucił(a) zlecenie „' + esc_(r.title) + '". Powód:<br><br><div style="padding:12px 14px;border-radius:10px;background:#f6f6f8;color:#16161a;white-space:pre-wrap">' + esc_(r.rejectReason) + '</div>',
+      [['Zlecenie', r.id]], ['Otwórz zlecenie', guestLink_(r)],
+      'Masz pytania? Odpowiedz na tego maila albo napisz komentarz pod zleceniem.'), u.email);
+}
+
 function sendAcceptedMail_(r, u) {
   if (!r.assigneeEmail) return;
   send_(r.id, [r.assigneeEmail], [], 'Zaakceptowane: ' + r.title,

@@ -4,6 +4,7 @@ var APP_NAME = 'Zlecenia Studio'; // nazwa nadawcy w mailach
 var TZ = 'Europe/Warsaw';
 var ALLOWED_DOMAINS = ['tc.pl', 'bnipolska.pl', 'cc.pl'];
 var STATUSES = ['Nowe', 'W realizacji', 'Do akceptacji', 'Gotowe'];
+var REJECTED = 'Odrzucone';  // tylko przez „Odrzuć zlecenie” (wymaga uzasadnienia), nie ma go w przełączniku statusów
 var BRANDS = ['The Company', 'CC', 'BNI', 'BNI+', 'CC+', 'Fundacja', 'Think Tank'];
 var CATEGORIES = ['rolka', 'trailer', 'showreel', 'avatar', 'inne'];
 var FORMATS = ['4:5 1080×1350', 'Kwadrat 1080×1080', 'Pionowy 1080×1920', 'Poziomy 1920×1080'];
@@ -43,10 +44,12 @@ function getAsset(name) {
 function props_() { return PropertiesService.getScriptProperties(); }
 function prop_(k) { return props_().getProperty(k); }
 
-function appUrl_() { return ScriptApp.getService().getUrl(); }
+// Krótki adres (Cloudflare Worker w redirect/ przekierowuje na ScriptApp.getService().getUrl()).
+var PUBLIC_URL = 'https://zlecenia-studio.tc.pl/';
+function appUrl_() { return PUBLIC_URL; }
 
 // Uruchamia się samo przy pierwszym wejściu właściciela; można też odpalić ręcznie z edytora.
-var SCHEMA_VERSION = '2';
+var SCHEMA_VERSION = '7';
 var MAX_REVISIONS = 3;
 
 function ensureSetup_() {
@@ -63,6 +66,11 @@ function ensureSetup_() {
 function migrate_() {
   Object.keys(SHEETS).forEach(function (name) {
     var sh = sh_(name), cols = SHEETS[name];
+    if (!sh) {  // nowa zakładka (np. Rezerwacje) — zakładamy pustą z nagłówkiem
+      sh = ss_().insertSheet(name);
+      sh.getRange(1, 1, sh.getMaxRows(), cols.length).setNumberFormat('@');
+      sh.setFrozenRows(1);
+    }
     var head = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0];
     cols.forEach(function (c, i) {
       if (head[i] !== c) {
@@ -71,7 +79,26 @@ function migrate_() {
       }
     });
   });
+  fixTermTimes_();
+  migrateRezerwacje_();
+  try { ensureStudioTrigger_(); } catch (e) {}  // bez zgody na wyzwalacze — włączy je autoryzujKalendarz()
   props_().setProperty('SCHEMA', SCHEMA_VERSION);
+}
+
+// Godziny w Terminy jako tekst 'HH:MM': najpierw odczyt tego, co widać (Sheets mógł je zamienić na czas), potem format '@' i zapis.
+function fixTermTimes_() {
+  var sh = sh_('Terminy');
+  if (!sh) return;
+  var n = sh.getLastRow() - 1;
+  ['ready', 'start', 'end'].forEach(function (k) {
+    var col = SHEETS.Terminy.indexOf(k) + 1;
+    if (col < 1) return;
+    var all = sh.getRange(2, col, sh.getMaxRows() - 1, 1);
+    var vals = n > 0 ? sh.getRange(2, col, n, 1).getValues() : [], disp = n > 0 ? sh.getRange(2, col, n, 1).getDisplayValues() : [];
+    var fixed = vals.map(function (row, i) { return [row[0] instanceof Date ? hmCell_(disp[i][0]) : hmCell_(row[0])]; });
+    all.setNumberFormat('@');
+    if (n > 0) sh.getRange(2, col, n, 1).setValues(fixed);
+  });
 }
 
 function setup() {

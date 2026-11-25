@@ -1,6 +1,6 @@
 # Studio TC · Portal zleceń
 
-**Link:** https://script.google.com/a/macros/tc.pl/s/AKfycbxCuqT-codSSs1sPCR8WEH7U4sRDiSMIxEfX9Oalc8FjnVsh4FtuqDEAD1wcoAFHz1G/exec
+**Link:** https://zlecenia-studio.tc.pl (przekierowanie przez Cloudflare Worker z `redirect/`)
 GitHub: https://github.com/thecompany-pl/studio-zlecenia (prywatne; kod na gałęzi `portal-zlecen-v1`, `main` czeka na admina org.)
 Script ID: 1y99UFhAKYBabtICYRJIu2E40B9U2qJbbTZX_tPJYODRSCHfH4Kq5PweQ · Deployment: `AKfycbxCuqT-codSSs1sPCR8WEH7U4sRDiSMIxEfX9Oalc8FjnVsh4FtuqDEAD1wcoAFHz1G`
 
@@ -54,3 +54,7 @@ http://localhost:8770/?as=m.lis@example.com — `?as=` udaje zalogowaną osobę 
 - Domena `cc.pl` niepotwierdzona: jeśli to osobny Workspace, osoby z cc.pl nie wejdą. Wtedy zmień `access` w `appsscript.json` na `ANYONE` (ktokolwiek z kontem Google), a serwer i tak odrzuci adresy spoza `ALLOWED_DOMAINS`.
 - Pliki leżą na Drive właściciela; pobieranie idzie przez appkę (sprawdza uprawnienia), więc nie trzeba niczego udostępniać.
 - Szkic zlecenia trzyma się w przeglądarce; wgrane pliki szkicu wygasają po ~5 h.
+
+## Zlecenia studyjne
+
+Sekcja „Zlecenia studyjne”: `src/Studio.gs` (backend), `src/Series.gs` (serie, godziny pracy, kolizje — testy `tools/test_series.mjs`), `src/studio_js.html` (UI). Po pierwszym wdrożeniu uruchom raz w edytorze funkcję `autoryzujKalendarz` (zgody na kalendarz i codzienny wyzwalacz o 7:00). Zarządzającego studiem ustawia admin w Ustawieniach.

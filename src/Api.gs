@@ -16,12 +16,55 @@ function getBootstrap() {
     holidays: holidays_(),
     statuses: STATUSES, brands: BRANDS, categories: CATEGORIES, formats: FORMATS,
     platforms: PLATFORMS, priorities: PRIORITIES, domains: ALLOWED_DOMAINS,
+    rea: reaConfig_(), canApproveRea: canApproveAny_(u), isManager: isManager_(u),
     now: nowParts_(),
     appUrl: appUrl_()
   };
 }
 
-// --- upload w kawałkach: kawałki base64 lądują jako pliki tymczasowe, finalizacja skleja je w plik docelowy ---
+// --- upload bezpośredni: serwer otwiera sesję wznawialną Drive, przeglądarka wysyła bajty prosto do Google ---
+// Nagłówek Origin przy otwieraniu sesji sprawia, że Drive przyjmie PUT-y z ramki portalu (CORS).
+
+function openResumable_(name, mime, size, parentId, origin) {
+  var res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id,size', {
+    method: 'post', contentType: 'application/json; charset=UTF-8', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'X-Upload-Content-Type': mime, 'X-Upload-Content-Length': String(size), Origin: origin },
+    payload: JSON.stringify({ name: name, parents: [parentId] })
+  });
+  var url = res.getHeaders().Location || res.getHeaders().location;
+  if (res.getResponseCode() !== 200 || !url) throw new Error('Drive nie przyjął uploadu (' + res.getResponseCode() + ').');
+  return url;
+}
+
+function checkOrigin_(origin) {
+  if (!/^https:\/\/[a-z0-9-]+\.googleusercontent\.com$/.test(String(origin))) throw new Error('Nieprawidłowe źródło uploadu.');
+}
+
+function startDirectUpload(kind, name, mime, size, origin) {
+  var u = me_();
+  checkOrigin_(origin);
+  var ext = String(name).split('.').pop().toLowerCase();
+  if (!EXT[kind] || EXT[kind].indexOf(ext) < 0) throw new Error('Niedozwolony typ pliku: .' + ext);
+  if (!(size > 0 && size <= MAX_FILE_BYTES)) throw new Error('Plik jest większy niż 10 MB.');
+  mime = mime || 'application/octet-stream';
+  var url = openResumable_(name, mime, size, prop_('TMP_FOLDER_ID'), origin);
+  var uploadId = Utilities.getUuid().replace(/-/g, '');
+  CacheService.getScriptCache().put('du_' + uploadId, JSON.stringify({ email: u.email, kind: kind, name: name, mime: mime, size: size }), 21600);
+  return { uploadId: uploadId, url: url };
+}
+
+function finishDirectUpload(uploadId, fileId) {
+  var u = me_();
+  var s = json_(CacheService.getScriptCache().get('du_' + uploadId), null);
+  if (!s || s.email !== u.email) throw new Error('Sesja uploadu wygasła — wgraj plik ponownie.');
+  var file = DriveApp.getFileById(fileId);
+  if (!file.getParents().hasNext() || file.getParents().next().getId() !== prop_('TMP_FOLDER_ID') || file.getSize() !== s.size) throw new Error('Plik nie dotarł w całości — wgraj go ponownie.');
+  CacheService.getScriptCache().remove('du_' + uploadId);
+  CacheService.getScriptCache().put('up_' + fileId, u.email, 21600);
+  return { id: fileId, name: s.name, mime: s.mime, size: s.size };
+}
+
+// --- upload w kawałkach (zapas, gdy bezpośredni się nie uda): kawałki base64 lądują jako pliki tymczasowe, finalizacja skleja je w plik docelowy ---
 
 function uploadChunk(uploadId, index, data) {
   me_();
@@ -115,6 +158,7 @@ function submitRequest(p) {
   append_('Projekty', rec);
   log_(id, u.email, 'Zgłoszenie', 'Preferowany termin: ' + deadline.replace('T', ' '));
   sendNewRequestMails_(rec);
+  if (/^REA-\d{4}-\d{4}$/.test(String(p.linkedRea || ''))) linkMontage_(p.linkedRea, id, u);
   return { id: id, deadline: deadline };
 }
 
@@ -134,9 +178,12 @@ function listBoard() {
   return rows_('Projekty').map(tile_);
 }
 
+// Studio: zlecenia przyjęte do realizacji; pozostali: zgłoszone przez siebie albo jako owner.
 function listMine() {
   var u = me_();
+  var studio = isStudio_(u);
   return rows_('Projekty').filter(function (r) {
+    if (studio) return r.assigneeEmail === u.email;
     return r.requesterEmail === u.email || String(r.ownerEmail).toLowerCase() === u.email;
   }).map(tile_);
 }
@@ -152,6 +199,7 @@ function getProject(id, token) {
   var r = findProject_(id);
   if (!r || !canSee_(u, r, token)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
   var studio = isStudio_(u);
+  var staff = rows_('Dostep').filter(isStudio_).map(function (a) { return String(a.email).toLowerCase(); });
   var out = {
     id: r.id, createdAt: r.createdAt, updatedAt: r.updatedAt, status: r.status, title: r.title, description: r.description,
     requesterName: r.requesterName, requesterEmail: r.requesterEmail, ownerEmail: r.ownerEmail, brand: r.brand,
@@ -164,15 +212,17 @@ function getProject(id, token) {
     timecodes: json_(r.timecodes, []), coverFileId: r.coverFileId, coverThumb: r.coverThumb,
     finalFile: json_(r.finalFile, null),
     revisions: json_(r.revisions, []), maxRevisions: MAX_REVISIONS, acceptedAt: r.acceptedAt, acceptedBy: r.acceptedBy,
+    rejectReason: r.rejectReason, rejectedAt: r.rejectedAt, rejectedBy: r.rejectedBy,
     history: rows_('Historia').filter(function (h) { return h.projectId === id; })
       .map(function (h) { return { ts: h.ts, actor: h.actor, action: h.action, details: h.details }; }),
-    comments: studio ? rows_('Komentarze').filter(function (c) { return c.projectId === id; })
-      .map(function (c) { return { ts: c.ts, authorName: c.authorName, authorEmail: c.authorEmail, text: c.text }; }) : [],
+    comments: rows_('Komentarze').filter(function (c) { return c.projectId === id; })
+      .map(function (c) { return { ts: c.ts, authorName: c.authorName, authorEmail: c.authorEmail, text: c.text, studio: staff.indexOf(String(c.authorEmail).toLowerCase()) >= 0 }; }),
     can: {
       decide: canDecide_(u, r, token) && r.status === 'Do akceptacji',
       studio: studio,
-      claim: studio && !r.assigneeEmail,
-      edit: studio && (r.assigneeEmail === u.email || u.role === 'admin')
+      claim: studio && !r.assigneeEmail && r.status !== REJECTED,
+      reject: studio && r.status !== REJECTED && r.status !== 'Gotowe' && (!r.assigneeEmail || r.assigneeEmail === u.email || u.role === 'admin'),
+      edit: studio && r.status !== REJECTED && (r.assigneeEmail === u.email || u.role === 'admin')
     }
   };
   return out;
@@ -246,6 +296,7 @@ function withProjectLock_(id, fn) {
 function claimProject(id) {
   var u = requireStudio_();
   withProjectLock_(id, function (r) {
+    if (r.status === REJECTED) throw new Error('To zlecenie zostało odrzucone.');
     if (r.assigneeEmail && r.assigneeEmail !== u.email) throw new Error('Już przyjął: ' + r.assigneeName);
     if (r.assigneeEmail === u.email) return;
     var patch = { assigneeEmail: u.email, assigneeName: u.name, claimedAt: nowIso_(), updatedAt: nowIso_() };
@@ -255,6 +306,25 @@ function claimProject(id) {
     for (var k in patch) r[k] = patch[k];
     sendClaimedMail_(r);
   });
+  return getProject(id);
+}
+
+// Odrzucenie: tylko z uzasadnieniem, które trafia mailem do zgłaszającego (owner w kopii).
+function rejectProject(id, reason) {
+  var u = requireStudio_();
+  reason = String(reason || '').trim().slice(0, 4000);
+  if (reason.length < 10) throw new Error('Uzasadnij odrzucenie (min. 10 znaków).');
+  var row;
+  withProjectLock_(id, function (r) {
+    if (r.status === REJECTED) throw new Error('To zlecenie jest już odrzucone.');
+    if (r.status === 'Gotowe') throw new Error('Nie można odrzucić zamkniętego zlecenia.');
+    if (r.assigneeEmail && r.assigneeEmail !== u.email && u.role !== 'admin') throw new Error('Odrzucić może osoba przypisana albo admin.');
+    var patch = { status: REJECTED, rejectReason: reason, rejectedAt: nowIso_(), rejectedBy: u.name, updatedAt: nowIso_() };
+    update_('Projekty', r._row, patch);
+    log_(id, u.email, 'Odrzucone', reason);
+    row = Object.assign({}, r, patch);
+  });
+  sendRejectedMail_(row, u);
   return getProject(id);
 }
 
@@ -297,13 +367,17 @@ function updateProject(id, patch) {
   return getProject(id);
 }
 
-function addComment(id, text) {
-  var u = requireStudio_();
+// Dyskusja pod zleceniem: studio + zgłaszający/owner (także z linkiem z maila). Druga strona dostaje maila.
+function addComment(id, text, token) {
+  var u = me_();
   text = String(text || '').trim().slice(0, 4000);
   if (!text) throw new Error('Pusty komentarz.');
-  if (!findProject_(id)) throw new Error('Nie znaleziono zlecenia.');
+  if (/^RE[AZ]-/.test(String(id))) return addReaComment_(id, text, u);
+  var r = findProject_(id);
+  if (!r || !canSee_(u, r, token)) throw new Error('Nie znaleziono zlecenia albo nie masz do niego dostępu.');
   append_('Komentarze', { ts: nowIso_(), projectId: id, authorEmail: u.email, authorName: u.name, text: text });
-  return getProject(id);
+  sendCommentMail_(r, text, u, isStudio_(u));
+  return getProject(id, token);
 }
 
 // --- plik finalny: upload wznawialny prosto do Drive (kawałki po 4 MB, bez sklejania w pamięci) ---
@@ -332,6 +406,42 @@ function startFinalUpload(projectId, name, mime, size) {
   return uploadId;
 }
 
+function startFinalDirect(projectId, name, mime, size, origin) {
+  var u = requireStudio_();
+  checkOrigin_(origin);
+  var r = findProject_(projectId);
+  if (!r) throw new Error('Nie znaleziono zlecenia.');
+  if (r.assigneeEmail !== u.email && u.role !== 'admin') throw new Error('Plik finalny wrzuca osoba przypisana albo admin.');
+  var ext = String(name).split('.').pop().toLowerCase();
+  if (FINAL_EXT.indexOf(ext) < 0) throw new Error('Niedozwolony typ pliku: .' + ext);
+  if (!(size > 0 && size <= FINAL_MAX)) throw new Error('Plik finalny może mieć maks. 2 GB.');
+  mime = mime || 'application/octet-stream';
+  var url = openResumable_('FINAL · ' + name, mime, size, r.folderId, origin);
+  var uploadId = Utilities.getUuid().replace(/-/g, '');
+  CacheService.getScriptCache().put('fd_' + uploadId, JSON.stringify({ projectId: projectId, folderId: r.folderId, email: u.email, size: size, name: name, mime: mime }), 21600);
+  return { uploadId: uploadId, url: url };
+}
+
+function finishFinalDirect(uploadId, fileId) {
+  var u = requireStudio_();
+  var s = json_(CacheService.getScriptCache().get('fd_' + uploadId), null);
+  if (!s || s.email !== u.email) throw new Error('Sesja uploadu wygasła — zacznij od nowa.');
+  var file = DriveApp.getFileById(fileId);
+  if (!file.getParents().hasNext() || file.getParents().next().getId() !== s.folderId || file.getSize() !== s.size) throw new Error('Plik nie dotarł w całości — wgraj go ponownie.');
+  CacheService.getScriptCache().remove('fd_' + uploadId);
+  return registerFinal_(s, fileId, u);
+}
+
+function registerFinal_(s, fileId, u) {
+  var meta = { id: fileId, name: s.name, mime: s.mime, size: s.size, at: nowIso_(), by: u.name };
+  withProjectLock_(s.projectId, function (r) {
+    update_('Projekty', r._row, { finalFile: JSON.stringify(meta), updatedAt: nowIso_() });
+    log_(r.id, u.email, 'Plik finalny', s.name);
+    shareFinal_(fileId, r);
+  });
+  return { done: true, project: getProject(s.projectId) };
+}
+
 function uploadFinalChunk(uploadId, offset, b64) {
   var u = requireStudio_();
   var s = json_(CacheService.getScriptCache().get('fu_' + uploadId), null);
@@ -347,13 +457,7 @@ function uploadFinalChunk(uploadId, offset, b64) {
   if (code !== 200 && code !== 201) throw new Error('Błąd wysyłania do Drive (' + code + ').');
   var fileId = JSON.parse(res.getContentText()).id;
   CacheService.getScriptCache().remove('fu_' + uploadId);
-  var meta = { id: fileId, name: s.name, mime: s.mime, size: s.size, at: nowIso_(), by: u.name };
-  withProjectLock_(s.projectId, function (r) {
-    update_('Projekty', r._row, { finalFile: JSON.stringify(meta), updatedAt: nowIso_() });
-    log_(r.id, u.email, 'Plik finalny', s.name);
-    shareFinal_(fileId, r);
-  });
-  return { done: true, project: getProject(s.projectId) };
+  return registerFinal_(s, fileId, u);
 }
 
 // Podgląd w odtwarzaczu Drive wymaga prawa do odczytu: najpierw „każdy w domenie z linkiem", a jak polityka nie pozwala — imiennie, bez maili od Google.
@@ -375,7 +479,9 @@ function getSettings() {
   return {
     access: rows_('Dostep').map(function (r) { return { email: r.email, name: r.name, role: r.role, addedBy: r.addedBy, addedAt: r.addedAt }; }),
     presets: presets_(),
-    holidays: holidays_()
+    holidays: holidays_(),
+    studioManager: studioManager_(),
+    studio: studioSettings_()
   };
 }
 

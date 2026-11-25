@@ -67,8 +67,10 @@ function nowWaw() {
     .formatToParts(new Date()).map(x => [x.type, x.value]));
   return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) + Number(p.minute) / 60 };
 }
+const closed = t => t.status === 'Gotowe' || t.status === 'Odrzucone';
 function dueInfo(t) {
   if (t.status === 'Gotowe') return { cls: 'fin', txt: 'gotowe' };
+  if (t.status === 'Odrzucone') return { cls: 'rej', txt: 'odrzucone' };
   const iso = t.confirmedDeadline || t.deadline;
   if (!iso) return { cls: '', txt: '—' };
   const ymd = iso.slice(0, 10), n = nowWaw(), hour = Number(iso.slice(11, 13)) || 17;
@@ -94,16 +96,32 @@ const nav = {
   replace(h) { google.script.history.replace(null, null, h.replace(/^#/, '')); render(h); }
 };
 
+// Dwie sekcje portalu: zlecenia montażowe i zlecenia studyjne (realizacje). Każda ma własne podmenu.
+function sectionOf(r) { return /^\/(studio|realizacja|rezerwacja)/.test(r || '') ? 'studio' : 'montaz'; }
 function renderTop() {
-  const items = [['/nowe', 'Nowe zlecenie'], ['/moje', 'Moje zlecenia']];
-  if (isStudio()) items.push(['/tablica', 'Tablica studia']);
+  const sec = sectionOf(route);
+  const items = sec === 'studio' ? studioNavItems() : [['/nowe', 'Nowe zlecenie'], ['/moje', 'Moje zlecenia']].concat(isStudio() ? [['/tablica', 'Tablica studia']] : []);
   if (B.user.role === 'admin') items.push(['/ustawienia', 'Ustawienia']);
-  $('#nav').innerHTML = items.map(([h, l]) => `<button data-go="${h}" class="${route.startsWith(h) || (h === '/tablica' && route.startsWith('/projekt')) && isStudio() ? 'on' : ''}">${l}${h === '/tablica' && B.freeCount ? `<span class="count">${B.freeCount}</span>` : ''}</button>`).join('');
+  const on = h => route === h || route.startsWith(h + '/') || (h === '/tablica' && route.startsWith('/projekt') && isStudio()) ||
+    (h === '/studio/moje' && /^\/(realizacja|rezerwacja)/.test(route) && !isStudio()) || (h === '/studio/kalendarz' && /^\/(realizacja|rezerwacja)/.test(route) && isStudio());
+  const cnt = h => h === '/tablica' && B.freeCount ? B.freeCount : h === '/studio/akceptacja' && B.reaPending ? B.reaPending : 0;
+  $('#nav').innerHTML = `<div class="seg" role="tablist"><button data-go="${esc(lastOf('montaz'))}" class="${sec === 'montaz' ? 'on' : ''}">Zlecenia montażowe</button><button data-go="${esc(lastOf('studio'))}" class="${sec === 'studio' ? 'on' : ''}">Zlecenia studyjne</button></div>` +
+    items.map(([h, l]) => `<button data-go="${h}" class="${on(h) ? 'on' : ''}">${l}${cnt(h) ? `<span class="count">${cnt(h)}</span>` : ''}</button>`).join('');
   $('#me').innerHTML = `<span class="nm">${esc(B.user.name)}</span><span class="av" title="${esc(B.user.email)}">${initials(B.user.name)}</span>`;
 }
+// Ostatnio odwiedzona trasa w sekcji (przełącznik wraca tam, gdzie się skończyło).
+function lastOf(sec) { return store.get('stz_last_' + sec, '') || (sec === 'studio' ? '/studio' : (isStudio() ? '/tablica' : '/nowe')); }
 
 function render(h) {
-  route = (h || '').replace(/^#/, '') || (isStudio() ? '/tablica' : '/nowe');
+  route = (h || '').replace(/^#/, '');
+  if (!route) {
+    const sec = store.get('stz_section', '');
+    route = sec ? lastOf(sec) : '/start';
+  }
+  if (route !== '/start' && route !== '/gotowe' && route !== '/studio/gotowe') {
+    store.set('stz_section', sectionOf(route));
+    if (!/^\/(projekt|realizacja|rezerwacja)[/]/.test(route)) store.set('stz_last_' + sectionOf(route), route);
+  }
   setProg(0);
   renderTop();
   window.scrollTo(0, 0);
@@ -111,6 +129,8 @@ function render(h) {
   if (m) return viewProject(decodeURIComponent(m[1]));
   if (route === '/tablica' && isStudio()) return viewBoard();
   if (route === '/moje') return viewMine();
+  if (route === '/start') return viewStart();
+  if (sectionOf(route) === 'studio') return renderStudio(route);
   if (route === '/ustawienia' && B.user.role === 'admin') return viewSettings();
   if (route === '/gotowe') return; // ekran sukcesu rysuje kreator
   route = '/nowe'; renderTop();
@@ -128,7 +148,7 @@ const EMPTY = () => ({
   title: '', description: '', requesterName: store.get('stz_name', '') || B.user.name, ownerEmail: B.user.email,
   brand: '', category: '', formats: [], platforms: [], priority: '', materialsLink: '', publishDate: '',
   scriptFiles: [], tcMode: 'text', tcText: '', timecodesFile: null, cover: null, coverThumb: '',
-  presetKey: '', workDays: 1
+  presetKey: '', workDays: 1, linkedRea: ''
 });
 const W = { step: 0, d: null, touched: {}, tried: {}, dir: 1, sending: false, pending: new Map() };
 const STEPS = 4;
@@ -262,7 +282,7 @@ function stepTitle() {
 function stepBrief() {
   const d = W.d;
   return `
-  ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Cel materiału, do kogo mówimy, kluczowy przekaz, CTA, orientacyjna długość, uwagi do montażu…">${esc(d.description)}</textarea><div class="counter"><span id="dCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
+  ${fieldWrap('description', 'Opis zadania', `<textarea class="in" data-k="description" placeholder="Cel materiału, do kogo mówimy, kluczowy przekaz, CTA, orientacyjna długość, uwagi do montażu…">${esc(d.description)}</textarea><div class="counter ${d.description.trim().length >= 40 ? 'ok' : ''}" id="dCountBox"><span id="dCount">${d.description.trim().length}</span> znaków · min. 40</div>`)}
   <div class="row2">
     ${fieldWrap('requesterName', 'Osoba zgłaszająca', `<input class="in" data-k="requesterName" value="${esc(d.requesterName)}" autocomplete="name">`)}
     ${fieldWrap('requesterEmail', 'E-mail', `<input class="in" value="${esc(B.user.email)}" readonly>`, { opt: false, hint: 'Z Twojego konta Google.' })}
@@ -397,7 +417,7 @@ function bindBody() {
       W.d[k] = k === 'workDays' ? Math.max(0, Math.round(Number(el.value) || 0)) : el.value;
       if (k === 'requesterName') store.set('stz_name', el.value);
       if (k === 'title') $('#tCount').textContent = el.value.length;
-      if (k === 'description') $('#dCount').textContent = el.value.trim().length;
+      if (k === 'description') { $('#dCount').textContent = el.value.trim().length; $('#dCountBox').classList.toggle('ok', el.value.trim().length >= 40); }
       if (k === 'tcText') { const tp = $('#tcPrev'); const tmp = document.createElement('div'); tmp.innerHTML = stepFiles(); tp.innerHTML = $('#tcPrev', tmp).innerHTML; }
       if (k === 'workDays') { const n = nowWaw(); if (W.d.workDays >= 1 && W.d.workDays <= 60) { $('#dueV').textContent = fmtDue(computeDeadline(n.date, n.hour, W.d.workDays, HOL, curCutoff()), true); } }
       saveDraft(); refreshWizard();
@@ -474,7 +494,46 @@ function makeThumb(file) {
   });
 }
 
+// Upload bezpośredni do Drive: kawałki po 32 MB (wielokrotność 256 KB), postęp z XHR. 308 = kawałek przyjęty, 200/201 = koniec.
+const DIRECT_CHUNK = 32 * 1024 * 1024;
+let DIRECT_OK = true; // po pierwszej porażce (np. blokada CORS) przechodzimy na zapasowy upload przez serwer
+function putRange(url, blob, start, total, onProgress) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', url);
+    x.setRequestHeader('Content-Range', 'bytes ' + start + '-' + (start + blob.size - 1) + '/' + total);
+    x.upload.onprogress = e => onProgress && onProgress(start + e.loaded);
+    x.onload = () => {
+      if (x.status === 308) return res(null);
+      if (x.status === 200 || x.status === 201) { try { return res(JSON.parse(x.responseText)); } catch (e) { return rej(new Error('Drive zwrócił niezrozumiałą odpowiedź.')); } }
+      rej(new Error('Błąd wysyłania do Drive (' + x.status + ').'));
+    };
+    x.onerror = () => rej(new Error('direct-network'));
+    x.send(blob);
+  });
+}
+async function putDirect(url, file, onProgress) {
+  let done = null;
+  for (let off = 0; off < file.size; off += DIRECT_CHUNK) {
+    done = await putRange(url, file.slice(off, off + DIRECT_CHUNK), off, file.size, onProgress);
+  }
+  if (!done || !done.id) throw new Error('Drive nie potwierdził zapisu pliku.');
+  return done.id;
+}
+
 async function uploadOne(f, file, kind) {
+  if (DIRECT_OK) {
+    try {
+      const s = await api('startDirectUpload', kind, file.name, file.type || 'application/octet-stream', file.size, location.origin);
+      const fileId = await putDirect(s.url, file, sent => { f.p = Math.min(.97, sent / file.size); updateBars(); });
+      f.meta = await api('finishDirectUpload', s.uploadId, fileId);
+      f.status = 'ok'; f.p = 1; f.at = Date.now();
+      saveDraft(); updateBars(); return;
+    } catch (err) {
+      if (err.message !== 'direct-network') { f.status = 'err'; f.err = err.message; saveDraft(); updateBars(); return; }
+      DIRECT_OK = false;
+    }
+  }
   try {
     const b64 = await readB64(file);
     const id = rid(), total = Math.max(1, Math.ceil(b64.length / CHUNK));
@@ -531,7 +590,7 @@ async function submitWizard() {
     const res = await api('submitRequest', {
       title: d.title.trim(), description: d.description.trim(), requesterName: d.requesterName.trim(), ownerEmail: d.ownerEmail.trim(),
       brand: d.brand, category: d.category, formats: d.formats, platforms: d.platforms, priority: d.priority,
-      materialsLink: d.materialsLink.trim(), publishDate: d.publishDate,
+      materialsLink: d.materialsLink.trim(), publishDate: d.publishDate, linkedRea: d.linkedRea || '',
       scriptFiles: d.scriptFiles.filter(f => f.meta).map(f => f.meta),
       timecodesFile: d.tcMode === 'file' && d.timecodesFile && d.timecodesFile.meta ? d.timecodesFile.meta : null,
       timecodes: d.tcMode === 'text' ? rows : [],
@@ -583,7 +642,7 @@ async function viewBoard() {
   const app = $('#app');
   app.innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Studio</div><h1 class="h1">Tablica zleceń</h1></div><div class="stats" id="stats"></div></div><div id="filters"></div><div id="tiles">${skeleton()}</div></section>`;
   try { BOARD = await api('listBoard'); } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
-  B.freeCount = BOARD.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop();
+  B.freeCount = BOARD.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop();
   drawBoard();
 }
 
@@ -594,7 +653,7 @@ function drawBoard() {
   $('#stats').innerHTML = [['Nowe', cnt('Nowe')], ['W realizacji', cnt('W realizacji')], ['Do akceptacji', cnt('Do akceptacji')], ['Wolne', B.freeCount]]
     .map(([k, v]) => `<div class="stat"><div class="sv">${v}</div><div class="sk">${k}</div></div>`).join('');
   $('#filters').innerHTML = `<div class="filters">
-    ${fc('status', 'aktywne', 'Aktywne')}${B.statuses.map(s => fc('status', s)).join('')}${fc('status', '', 'Wszystkie')}
+    ${fc('status', 'aktywne', 'Aktywne')}${B.statuses.concat('Odrzucone').map(s => fc('status', s)).join('')}${fc('status', '', 'Wszystkie')}
     <span class="sep"></span>${fc('who', 'moje', 'Moje')}${fc('who', 'wolne', 'Wolne')}
     <span class="sep"></span>
     <select class="sel" data-fsel="brand"><option value="">Każdy brand</option>${B.brands.map(b => `<option ${F.brand === b ? 'selected' : ''}>${esc(b)}</option>`).join('')}</select>
@@ -612,7 +671,7 @@ function drawTiles() {
   const PR = { krytyczny: 0, wysoki: 1, 'średni': 2, niski: 3 };
   const q = F.q.trim().toLowerCase();
   let list = BOARD.filter(t =>
-    (F.status === 'aktywne' ? t.status !== 'Gotowe' : !F.status || t.status === F.status) &&
+    (F.status === 'aktywne' ? !closed(t) : !F.status || t.status === F.status) &&
     (!F.brand || t.brand === F.brand) && (!F.category || t.category === F.category) &&
     (F.who !== 'moje' || t.assigneeEmail === B.user.email) && (F.who !== 'wolne' || !t.assigneeEmail) &&
     (!q || (t.title + ' ' + t.id).toLowerCase().includes(q)));
@@ -627,11 +686,14 @@ function drawTiles() {
 // ================= MOJE ZLECENIA =================
 
 async function viewMine() {
-  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Twoje</div><h1 class="h1">Moje zlecenia</h1><p class="lead" style="margin:0">Zlecenia, które zgłosiłeś(-aś) albo w których jesteś ownerem.</p></div><button class="btn btn-p" data-go="/nowe">Nowe zlecenie</button></div><div id="tiles">${skeleton(3)}</div></section>`;
+  const studio = B.user.role !== 'user';
+  const lead = studio ? 'Zlecenia, które przyjąłeś(-ęłaś) do realizacji.' : 'Zlecenia, które zgłosiłeś(-aś) albo w których jesteś ownerem.';
+  $('#app').innerHTML = `<section class="view"><div class="board-head"><div><div class="eyebrow">Twoje</div><h1 class="h1">Moje zlecenia</h1><p class="lead" style="margin:0">${lead}</p></div><button class="btn btn-p" data-go="/nowe">Nowe zlecenie</button></div><div id="tiles">${skeleton(3)}</div></section>`;
   try {
     const list = (await api('listMine')).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
     $('#tiles').innerHTML = list.length ? `<div class="grid">${list.map((t, i) => tileHtml(t, false, i)).join('')}</div>`
-      : `<div class="empty"><div class="h">Nie masz jeszcze zleceń</div>Zgłoś pierwsze — zajmie Ci to 3 minuty.</div>`;
+      : studio ? `<div class="empty"><div class="h">Nie masz przyjętych zleceń</div>Wybierz zlecenie z tablicy i kliknij „Biorę to”.</div>`
+        : `<div class="empty"><div class="h">Nie masz jeszcze zleceń</div>Zgłoś pierwsze — zajmie Ci to 3 minuty.</div>`;
   } catch (e) { $('#tiles').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -662,7 +724,7 @@ function drawProject(p) {
     </div></div>
     <div class="pgrid">
       <div>
-        ${acceptedBanner(p)}
+        ${acceptedBanner(p)}${rejectedBanner(p)}
         ${finalCard(p)}
         ${decisionCard(p)}
         ${revisionsCard(p)}
@@ -677,10 +739,10 @@ function drawProject(p) {
         </dl></div>
         ${filesList.length ? `<div class="card sec"><div class="card-t">Pliki</div>${filesList.map(([f, k]) => `<button class="dl" data-file="${esc(f.id)}"><span class="muted">${k === 'Okładka' ? ICON.img : ICON.doc}</span><span class="nm">${esc(f.name)}</span><span class="dim" style="font-size:12px">${esc(k)}${f.size ? ' · ' + fmtSize(f.size) : ''}</span>${ICON.dl}</button>`).join('')}</div>` : ''}
         ${p.timecodes.length ? `<div class="card sec"><div class="card-t">Czasówki</div><table class="tc-tab" style="margin:0"><tr><th>#</th><th>Od</th><th>Do</th><th>Długość</th><th>Opis</th></tr>${p.timecodes.map((r, i) => `<tr><td class="dim">${i + 1}</td><td class="mono">${esc(r.from)}</td><td class="mono">${esc(r.to)}</td><td class="mono">${fmtDur(tcSec(r.to) - tcSec(r.from))}</td><td>${esc(r.note)}</td></tr>`).join('')}</table><div class="tc-sum"><span>${p.timecodes.length} fragmentów</span><span>Łącznie: <b style="color:var(--tx)">${fmtDur(tcSum)}</b></span></div></div>` : ''}
-        ${p.can.studio ? `<div class="card sec"><div class="card-t">Komentarze studia <span class="dim">· widzi tylko studio</span></div>
-          ${p.comments.map(c => `<div class="cm"><div class="ch"><span>${esc(c.authorName)}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy.</p>'}
-          <textarea class="in" id="cmIn" style="min-height:80px" placeholder="Notatka dla zespołu…"></textarea>
-          <div style="text-align:right;margin-top:10px"><button class="btn btn-g btn-sm" id="cmAdd">Dodaj komentarz</button></div></div>` : ''}
+        <div class="card sec"><div class="card-t">Komentarze <span class="dim">· widzi studio i zgłaszający</span></div>
+          ${p.comments.map(c => `<div class="cm${c.studio ? ' cm-st' : ''}"><div class="ch"><span>${esc(c.authorName)}${c.studio ? ' <span class="cm-tag">Studio</span>' : ''}</span><span>${fmtTs(c.ts)}</span></div><div class="cb">${esc(c.text)}</div></div>`).join('') || '<p class="muted" style="margin:0 0 12px;font-size:13.5px">Brak komentarzy. Tu możecie omawiać szczegóły zlecenia.</p>'}
+          <textarea class="in" id="cmIn" style="min-height:80px" placeholder="${p.can.studio ? 'Napisz do zgłaszającego…' : 'Napisz do studia…'}"></textarea>
+          <div style="text-align:right;margin-top:10px"><button class="btn btn-g btn-sm" id="cmAdd">Dodaj komentarz</button></div></div>
       </div>
       <aside class="side">
         <div class="card">
@@ -689,6 +751,11 @@ function drawProject(p) {
             : p.can.claim ? `<button class="btn btn-p btn-lg claim" id="claim">Biorę to</button><div class="hint" style="text-align:center">Zadanie przypisze się do ${esc(B.user.email)}</div>`
             : '<p class="muted" style="margin:0">Czeka na osobę ze studia.</p>'}
           ${p.can.edit ? `<button class="btn-t btn" id="release" style="margin-top:10px;font-size:13px">Zwolnij zadanie</button>` : ''}
+          ${p.can.reject ? `<button class="btn-t btn rej-open" id="rejOpen">Odrzuć zlecenie</button>
+            <div id="rejBox" hidden><label class="lbl" style="margin-top:14px">Powód odrzucenia</label>
+            <textarea class="in" id="rejIn" style="min-height:90px" placeholder="Np. brak materiałów, termin niemożliwy do realizacji, zlecenie poza zakresem studia…"></textarea>
+            <div class="hint">Uzasadnienie jest wymagane i trafi mailem do zgłaszającego.</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g btn-sm" id="rejCancel">Anuluj</button><button class="btn btn-sm btn-rej" id="rejSend">Odrzuć i wyślij</button></div></div>` : ''}
         </div>
         <div class="card">
           <div class="card-t">Termin</div>
@@ -709,6 +776,13 @@ function drawProject(p) {
     catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.innerHTML = old; if (/Już przyjął/.test(e.message)) viewProject(p.id); }
   };
   $('#claim') && ($('#claim').onclick = e => act(e.currentTarget, () => api('claimProject', p.id).then(np => { B.freeCount = Math.max(0, (B.freeCount || 0) - 1); renderTop(); return np; }), 'Zadanie jest Twoje. Zgłaszający dostał maila.'));
+  $('#rejOpen') && ($('#rejOpen').onclick = () => { $('#rejBox').hidden = false; $('#rejOpen').hidden = true; $('#rejIn').focus(); });
+  $('#rejCancel') && ($('#rejCancel').onclick = () => { $('#rejBox').hidden = true; $('#rejOpen').hidden = false; });
+  $('#rejSend') && ($('#rejSend').onclick = e => {
+    const t = $('#rejIn').value.trim();
+    if (t.length < 10) return toast('Uzasadnij odrzucenie (min. 10 znaków).', 'bad');
+    act(e.currentTarget, () => api('rejectProject', p.id, t), 'Zlecenie odrzucone, zgłaszający dostał maila.');
+  });
   $('#release') && ($('#release').onclick = e => { if (confirm('Oddać to zadanie? Wróci jako wolne na tablicę.')) act(e.currentTarget, () => api('releaseProject', p.id), 'Zadanie zwolnione.'); });
   $$('[data-st]').forEach(b => b.onclick = () => act(b, () => api('updateProject', p.id, { status: b.dataset.st, deliveryLink: $('#dlIn').value.trim() }), 'Status: ' + b.dataset.st));
   $('#dlSave') && ($('#dlSave').onclick = e => act(e.currentTarget, () => api('updateProject', p.id, { deliveryLink: $('#dlIn').value.trim() }), 'Link zapisany.'));
@@ -720,7 +794,7 @@ function drawProject(p) {
     if (t.length < 10) return toast('Opisz poprawki (min. 10 znaków).', 'bad');
     act(e.currentTarget, () => api('requestRevision', p.id, t, TOK[p.id] || ''), 'Poprawki wysłane do studia.');
   });
-  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t)); });
+  $('#cmAdd') && ($('#cmAdd').onclick = e => { const t = $('#cmIn').value.trim(); if (t) act(e.currentTarget, () => api('addComment', p.id, t, TOK[p.id] || '').then(np => { if ($('#cmIn')) $('#cmIn').value = ''; return np; }), 'Komentarz dodany.'); });
   $$('[data-file]').forEach(b => b.onclick = async () => {
     const old = b.innerHTML; b.style.opacity = .6;
     try {
@@ -738,6 +812,11 @@ function drawProject(p) {
 function acceptedBanner(p) {
   if (!p.acceptedAt) return '';
   return `<div class="card sec ok-banner"><span class="ok-dot">${ICON.check}</span><div><div class="w5">Zaakceptowane ${fmtTs(p.acceptedAt)}</div><div class="muted" style="font-size:13px">Zlecenie zamknięte. Materiał zostaje tu do pobrania.</div></div></div>`;
+}
+
+function rejectedBanner(p) {
+  if (p.status !== 'Odrzucone') return '';
+  return `<div class="card sec rej-banner"><span class="rej-dot">${ICON.x || '✕'}</span><div><div class="w5">Zlecenie odrzucone ${fmtTs(p.rejectedAt)}${p.rejectedBy ? ' · ' + esc(p.rejectedBy) : ''}</div><div class="rej-why">${esc(p.rejectReason)}</div></div></div>`;
 }
 
 function decisionCard(p) {
@@ -771,7 +850,8 @@ function finalCard(p) {
   const f = p.finalFile;
   const up = FUP && FUP.projectId === p.id;
   const preview = f ? `<div class="final-prev"><iframe src="${DRIVE_FILE}${encodeURIComponent(f.id)}/preview" allow="autoplay; fullscreen" allowfullscreen loading="lazy"></iframe></div>
-      <div class="final-meta"><span>${esc(f.name)} · ${fmtSize(f.size)} · ${esc(f.by || '')} ${fmtTs(f.at)}</span><span style="display:flex;gap:14px"><a href="${PROTO}drive.google.com/uc?export=download&id=${encodeURIComponent(f.id)}" target="_blank" rel="noopener">${ICON.dl} Pobierz</a><a href="${DRIVE_FILE}${encodeURIComponent(f.id)}/view" target="_blank" rel="noopener">${ICON.link} Otwórz w Drive</a></span></div>
+      <div class="final-meta"><span>${esc(f.name)} · ${fmtSize(f.size)} · ${esc(f.by || '')} ${fmtTs(f.at)}</span></div>
+      <div class="final-acts"><a class="btn btn-p" href="${PROTO}drive.google.com/uc?export=download&id=${encodeURIComponent(f.id)}" target="_blank" rel="noopener">${ICON.dl} Pobierz plik</a><a class="btn btn-g" href="${DRIVE_FILE}${encodeURIComponent(f.id)}/view" target="_blank" rel="noopener">${ICON.link} Otwórz na Drive</a></div>
       <div class="hint">Świeżo wrzucone wideo Drive przetwarza kilka minut — jeśli podgląd jest pusty, odśwież za chwilę.</div>` : '';
   const progress = up ? `<div class="file" style="margin-top:12px"><div style="flex:1;min-width:0"><div class="nm">${esc(FUP.name)}</div><div class="bar"><i id="fupBar" style="width:${Math.round(FUP.sent / FUP.size * 100)}%"></i></div></div><span class="sz" id="fupTxt">${fmtSize(FUP.sent)} / ${fmtSize(FUP.size)}</span></div>` : '';
   const drop = p.can.edit && !up ? `<label class="dz" data-final style="margin-top:${f ? 14 : 0}px"><input type="file" accept=".mp4,.mov,.m4v,.webm,.mxf,.jpg,.jpeg,.png,.gif,.pdf"><div class="ic">${ICON.up}</div><div class="t1">${f ? 'Podmień plik finalny' : 'Wrzuć plik finalny do wglądu'}</div><div class="t2">.mp4 .mov .webm .jpg .png .pdf · do 2 GB · zgłaszający zobaczy go na tej stronie</div></label>` : '';
@@ -797,9 +877,28 @@ async function uploadFinal(p, file) {
   FUP = { projectId: p.id, name: file.name, size: file.size, sent: 0 };
   drawProject(p);
   window.addEventListener('beforeunload', warnLeave);
+  const showSent = sent => { FUP.sent = sent; if ($('#fupBar')) { $('#fupBar').style.width = Math.round(sent / file.size * 100) + '%'; $('#fupTxt').textContent = fmtSize(sent) + ' / ' + fmtSize(file.size); } };
+  let res = null;
+  if (DIRECT_OK) {
+    try {
+      const s = await api('startFinalDirect', p.id, file.name, file.type || 'application/octet-stream', file.size, location.origin);
+      const fileId = await putDirect(s.url, file, showSent);
+      res = await api('finishFinalDirect', s.uploadId, fileId);
+    } catch (e) {
+      if (e.message !== 'direct-network') { FUP = null; toast(e.message, 'bad'); drawProject(p); window.removeEventListener('beforeunload', warnLeave); return; }
+      DIRECT_OK = false; showSent(0);
+    }
+  }
+  if (res) {
+    FUP = null;
+    toast('Plik finalny wrzucony.', 'ok');
+    if (route === '/projekt/' + p.id || route === '/projekt/' + encodeURIComponent(p.id)) drawProject(res.project);
+    window.removeEventListener('beforeunload', warnLeave);
+    return;
+  }
   try {
     const id = await api('startFinalUpload', p.id, file.name, file.type || 'application/octet-stream', file.size);
-    let offset = 0, res = null;
+    let offset = 0;
     while (offset < file.size) {
       const b64 = await readB64(file.slice(offset, offset + FINAL_CHUNK));
       res = await api('uploadFinalChunk', id, offset, b64);
@@ -839,6 +938,15 @@ function drawSettings(s) {
         <div id="pre">${s.presets.map(p => preRow(p)).join('')}</div>
         <div style="display:flex;justify-content:space-between;margin-top:10px"><button class="btn-t btn" id="preAdd">+ dodaj preset</button><button class="btn btn-g btn-sm" id="preSave">Zapisz presety</button></div>
         <div class="hint">Nazwa · etykieta · dni robocze · „do godz." (np. 12 przy avatarze: zgłoszone przed 12:00 → gotowe tego samego dnia).</div></div>
+      <div class="card" style="margin-bottom:20px"><div class="card-t">Zlecenia studyjne</div>
+        <label class="lbl">Zarządzający studiem</label>
+        <input class="in" id="stMgr" value="${esc(s.studio.manager || '')}" placeholder="imie.nazwisko@tc.pl" style="padding:9px 12px">
+        <div class="hint" style="margin-bottom:12px">Akceptuje realizacje i zgody na pracę poza ${B.rea.work[0]}:00–${B.rea.work[1]}:00. Puste = akceptują admini.</div>
+        <label class="lbl">Adres studia (lokalizacja w kalendarzu)</label>
+        <input class="in" id="stLoc" value="${esc(s.studio.location || '')}" placeholder="np. ul. Przykładowa 1, Warszawa" style="padding:9px 12px">
+        <label class="chk" style="margin-top:14px"><input type="checkbox" id="stCan" ${s.studio.canApprove ? 'checked' : ''}> Osoby ze studia mogą akceptować realizacje w godzinach pracy</label>
+        <label class="chk"><input type="checkbox" id="stNot" ${s.studio.notifyNew ? 'checked' : ''}> Mail o nowym zleceniu studyjnym także do całego studia</label>
+        <div style="text-align:right;margin-top:12px"><button class="btn btn-g btn-sm" id="stSave">Zapisz</button></div></div>
       <div class="card"><div class="card-t">Dni wolne</div>
         ${upcoming.map(h => `<div class="hol"><span>${esc(h.date.split('-').reverse().join('.'))} · <span class="muted">${esc(h.name)}</span></span><button class="x" data-rmhol="${esc(h.date)}">${ICON.x}</button></div>`).join('')}
         <div style="display:flex;gap:8px;margin-top:12px"><input class="in" type="date" id="hDate" style="padding:8px 10px"><input class="in" id="hName" placeholder="np. wyjazd firmowy" style="padding:8px 10px"><button class="btn btn-g btn-sm" id="hAdd" style="height:40px">Dodaj</button></div>
@@ -853,6 +961,7 @@ function drawSettings(s) {
     const list = $$('#pre .pre-row').map(r => ({ key: r.dataset.key, label: $('[data-p=label]', r).value.trim(), hint: $('[data-p=hint]', r).value.trim(), days: Number($('[data-p=days]', r).value), cutoff: Number($('[data-p=cutoff]', r).value) || 0 })).filter(p => p.label);
     run(() => api('savePresets', list), 'Presety zapisane.').then(() => { B.presets = list; });
   };
+  $('#stSave').onclick = () => run(() => api('saveStudioSettings', { manager: $('#stMgr').value, location: $('#stLoc').value, canApprove: $('#stCan').checked, notifyNew: $('#stNot').checked }), 'Zapisano ustawienia studia.');
   $('#hAdd').onclick = () => run(() => api('addHoliday', $('#hDate').value, $('#hName').value), 'Dodano dzień wolny.').then(refreshHol);
   $$('[data-rmhol]').forEach(b => b.onclick = () => run(() => api('removeHoliday', b.dataset.rmhol)).then(refreshHol));
 }
@@ -876,8 +985,10 @@ async function refreshHol() { try { const b = await api('getBootstrap'); HOL = b
   google.script.url.getLocation(loc => {
     const p = loc.parameter && loc.parameter.p;
     if (p && loc.parameter.t) { TOK[p] = loc.parameter.t; saveTok(); }
-    render(loc.hash || (p ? '/projekt/' + p : ''));
+    const rz = loc.parameter && loc.parameter.r;
+    render(loc.hash || (p ? '/projekt/' + p : rz ? '/realizacja/' + rz : ''));
   });
-  if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && t.status !== 'Gotowe').length; renderTop(); }).catch(() => {});
+  if (isStudio()) api('listBoard').then(l => { B.freeCount = l.filter(t => !t.assigneeEmail && !closed(t)).length; renderTop(); }).catch(() => {});
+  refreshReaCount();
 })();
 </script>
