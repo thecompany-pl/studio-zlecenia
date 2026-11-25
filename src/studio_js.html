@@ -832,14 +832,14 @@ function editedTerm(p, t) { return Object.assign({ teardownMin: t.teardownMin, t
 function captureReaUi() {
   const v = sel => { const n = $(sel); return n ? (n.type === 'checkbox' ? n.checked : n.value) : undefined; };
   return { propOpen: $('#apPropBox') && !$('#apPropBox').hidden, propText: v('#apPropIn'), noOpen: $('#apNoBox') && !$('#apNoBox').hidden, noText: v('#apNoIn'),
-    over: v('#apOver'), staff: v('#apStaff'), comment: v('#rcIn'), cancelText: v('#cxIn') };
+    over: v('#apOver'), staff: v('#apStaff'), comment: v('#rcIn') };
 }
 function restoreReaUi(ui) {
   if (!ui) return;
   const set = (sel, val) => { const n = $(sel); if (n && val !== undefined && val !== null) { if (n.type === 'checkbox') n.checked = !!val; else n.value = val; } };
   if (ui.propOpen && $('#apPropBox')) { $('#apPropBox').hidden = false; $('#apPropOpen').hidden = true; }
   if (ui.noOpen && $('#apNoBox')) { $('#apNoBox').hidden = false; $('#apNoOpen').hidden = true; }
-  set('#apPropIn', ui.propText); set('#apNoIn', ui.noText); set('#apOver', ui.over); set('#apStaff', ui.staff); set('#rcIn', ui.comment); set('#cxIn', ui.cancelText);
+  set('#apPropIn', ui.propText); set('#apNoIn', ui.noText); set('#apOver', ui.over); set('#apStaff', ui.staff); set('#rcIn', ui.comment);
 }
 
 function drawRea(p) {
@@ -899,7 +899,7 @@ function drawRea(p) {
     </div>` : (p.assignees.length ? `<div class="card"><div class="card-t">Obsada</div>${esc(p.assignees.map(a => a.name).join(', '))}</div>` : '');
   const anyCancel = p.terms.some(t => t.canCancel);
   const actions = (p.can.montage || anyCancel) ? `<div class="card">${p.can.montage ? `<button class="btn btn-g" id="mkMontage" style="width:100%">${ICON.rolka} Utwórz zlecenie montażowe</button><div class="hint">Otworzy kreator montażu z tytułem i linkiem do tej realizacji.</div>` : ''}
-      ${anyCancel ? (RCUR.cancel ? cancelBox(p) : `<button class="btn btn-g" id="cAll" style="width:100%;margin-top:${p.can.montage ? 14 : 0}px">Anuluj ${p.terms.filter(t => t.canCancel).length > 1 ? 'wszystkie przyszłe terminy' : 'zlecenie'}</button><div class="hint">Zwolni sloty w kalendarzu studia.</div>`) : ''}</div>` : '';
+      ${anyCancel ? `<button class="btn btn-g" id="cAll" style="width:100%;margin-top:${p.can.montage ? 14 : 0}px">Anuluj ${p.terms.filter(t => t.canCancel).length > 1 ? 'wszystkie przyszłe terminy' : 'zlecenie'}</button><div class="hint">Zwolni sloty w kalendarzu studia.</div>` : ''}</div>` : '';
   const banner = props.length && p.can.acceptProposal ? `<div class="card sec bk-prop"><div class="w5">Studio proponuje inny termin</div>${props.map(t => `<div style="margin-top:6px"><b>${esc(termLine(t.proposed))}</b> <span class="dim">(było: ${esc(termLine(t))})</span></div>`).join('')}
       ${props[0].decisionNote ? `<div class="rej-why" style="margin-top:8px">${esc(props[0].decisionNote)}</div>` : ''}
       <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap"><button class="btn btn-p" id="propOk">Przyjmuję termin</button><span class="hint" style="margin:auto 0">Nie pasuje? Napisz w komentarzu poniżej.</span></div></div>`
@@ -932,13 +932,45 @@ function drawRea(p) {
   if (appr) { const ds = p.terms.filter(t => t.canApprove).map(t => editedTerm(p, t).date); if (ds.some(d => !DAYCACHE[d])) ensureDays(ds).then(() => { if (route.startsWith('/realizacja/') || route.startsWith('/rezerwacja/')) drawRea(p); }).catch(() => {}); }
 }
 
-function cancelBox(p) {
-  const ids = RCUR.cancel === 'all' ? p.terms.filter(t => t.canCancel) : p.terms.filter(t => RCUR.cancel.includes(t.id));
-  return `<div id="cxBox" style="margin-top:${p.can.montage ? 14 : 0}px"><div class="w5">Anulujesz ${ids.length > 1 ? ids.length + ' terminy' : 'termin ' + esc(ids[0] ? termLine(ids[0]) : '')}</div>
-    <label class="lbl" style="margin-top:10px">Powód anulowania <span class="req">*</span></label>
-    <textarea class="in" id="cxIn" style="min-height:80px" maxlength="1000" placeholder="np. prelegent zachorował, przenosimy na styczeń"></textarea>
-    <div class="hint">Wymagane (min. 10 znaków). Powód trafi mailem do ${p.can.studio || p.can.approveAny ? 'zgłaszającego' : 'studia'}.</div>
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn btn-g btn-sm" id="cxBack">Wróć</button><button class="btn btn-sm btn-rej" id="cxSend">Anuluj i wyślij</button></div></div>`;
+// Okno anulowania: powód jest wymagany i trafia mailem do drugiej strony.
+function openCancelDialog(p, what) {
+  const list = what === 'all' ? p.terms.filter(t => t.canCancel) : p.terms.filter(t => what.includes(t.id));
+  if (!list.length) return;
+  const old = $('#cxOv'); if (old) old.remove();
+  const ov = document.createElement('div');
+  ov.id = 'cxOv'; ov.className = 'slot-ov';
+  ov.innerHTML = `<div class="slot-card" role="dialog" aria-label="Anulowanie">
+    <div class="eyebrow">Anulowanie</div>
+    <div class="slot-when">${esc(p.title)}<br><b>${list.length > 1 ? list.length + ' terminy' : esc(termLine(list[0]))}</b></div>
+    <label class="lbl" for="cxIn">Powód anulowania <span class="req">*</span></label>
+    <textarea class="in" id="cxIn" style="min-height:90px" maxlength="1000" placeholder="np. prelegent zachorował, przenosimy na styczeń"></textarea>
+    <div class="counter" id="cxCountBox"><span id="cxCount">0</span> znaków · min. 10</div>
+    <div class="hint">Powód trafi mailem do ${p.can.studio || p.can.approveAny ? (p.requesterEmail === B.user.email ? 'studia' : 'zgłaszającego') : 'studia'}. Terminy znikną z kalendarza studia.</div>
+    <div class="slot-act"><button class="btn btn-g" id="cxBack">Wróć</button><button class="btn btn-rej" id="cxSend">Anuluj i wyślij</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = ev => { if (ev.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  let downOnOv = false;
+  ov.onpointerdown = ev => { downOnOv = ev.target === ov; };
+  ov.onclick = ev => { if (ev.target === ov && downOnOv) close(); };
+  const inp = $('#cxIn');
+  inp.focus();
+  inp.oninput = () => { const n = inp.value.trim().length; $('#cxCount').textContent = n; $('#cxCountBox').classList.toggle('ok', n >= 10); };
+  $('#cxBack').onclick = close;
+  $('#cxSend').onclick = async () => {
+    const why = inp.value.trim();
+    if (why.length < 10) { toast('Podaj powód anulowania (min. 10 znaków).', 'bad'); inp.focus(); return; }
+    const btn = $('#cxSend'), html = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<span class="spin"></span>';
+    try {
+      const np = await api('cancelTerms', p.id, what === 'all' ? 'all' : list.map(t => t.id), why);
+      close();
+      toast((list.length > 1 ? 'Anulowano.' : 'Termin anulowany.') + ' Druga strona dostała maila z powodem.', 'ok');
+      dropDays(); RCUR = { id: np.id, edits: {}, sel: {}, ui: {} }; drawRea(np); refreshReaCount();
+    } catch (e) { toast(e.message, 'bad'); btn.disabled = false; btn.innerHTML = html; }
+  };
 }
 
 function editCard(p) {
@@ -1017,16 +1049,8 @@ function bindReaPage(p) {
     if (!btn.dataset.sure) { btn.dataset.sure = 1; btn.textContent = label; btn.classList.add('btn-rej'); if (hintSel && $(hintSel)) $(hintSel).textContent = hint; return; }
     fn();
   };
-  const openCancel = what => { RCUR.cancel = what; drawRea(p); const el = $('#cxBox'); if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); $('#cxIn').focus(); } };
-  $$('[data-cancel]').forEach(b => b.onclick = () => openCancel([b.dataset.cancel]));
-  $('#cAll') && ($('#cAll').onclick = () => openCancel('all'));
-  $('#cxBack') && ($('#cxBack').onclick = () => { RCUR.cancel = null; drawRea(p); });
-  $('#cxSend') && ($('#cxSend').onclick = e => {
-    const why = $('#cxIn').value.trim();
-    if (why.length < 10) { toast('Podaj powód anulowania (min. 10 znaków).', 'bad'); $('#cxIn').focus(); return; }
-    const all = RCUR.cancel === 'all';
-    act(e.currentTarget, () => api('cancelTerms', p.id, RCUR.cancel, why), all ? 'Anulowano. Druga strona dostała maila z powodem.' : 'Termin anulowany. Druga strona dostała maila z powodem.');
-  });
+  $$('[data-cancel]').forEach(b => b.onclick = () => openCancelDialog(p, [b.dataset.cancel]));
+  $('#cAll') && ($('#cAll').onclick = () => openCancelDialog(p, 'all'));
   $('#mkMontage') && ($('#mkMontage').onclick = () => {
     const cur = store.get('stz_draft', null) || {};
     store.set('stz_draft', Object.assign({}, cur, { linkedRea: p.id, title: cur.title || p.title, description: (cur.description ? cur.description + '\n\n' : '') + 'Materiał z realizacji ' + p.id + ' („' + p.title + '”, ' + termLine(p.terms.find(t => t.status === TS().ok) || p.terms[0]) + '). Link: ' + (B.appUrl || '') + '?r=' + p.id, brand: cur.brand || p.brand || '' }));
